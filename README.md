@@ -43,6 +43,33 @@ A documentação **Swagger** fica em `/swagger`. Health-check em `/health`.
 **Login de desenvolvimento:** qualquer usuário do seed (ex.: `Lucas Silva`, admin) com a senha
 `reflow1234`, ou o login técnico oculto `calibracao` / `calibra`.
 
+## 🛠️ Solução de problemas (perrengues comuns)
+
+Tropeços que enfrentamos ao subir o projeto pela primeira vez:
+
+| Sintoma | Causa | Solução |
+| --- | --- | --- |
+| `dotnet: command not found` (ou o VSCode não acha o .NET) | O SDK está em `~/.dotnet`, fora do `PATH` global. | Adicione ao `~/.bashrc`: `export DOTNET_ROOT="$HOME/.dotnet"` e `export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"`; reabra o terminal. |
+| `docker ... permission denied ... /var/run/docker.sock` | Usuário fora do grupo `docker` (e/ou a porta 5432 já está em uso por um Postgres local). | Use o Postgres local (bloco abaixo) **ou** `sudo usermod -aG docker $USER && newgrp docker` (e pare o Postgres local antes, pois a 5432 não pode ser usada pelos dois). |
+| `28P01: password authentication failed for user "reflow"` | O papel/banco `reflow`/`reflowoven` ainda não existem. | Crie-os (bloco abaixo). |
+| `Connection refused` / `No connection could be made` | Não há PostgreSQL rodando na 5432. | Suba o banco: `docker compose up -d` ou inicie o Postgres local. |
+| Log `fail ... __EFMigrationsHistory` no 1º start | **Normal**: a tabela de controle não existe num banco vazio; o EF a cria em seguida. | Nada a fazer. |
+| `warn ... No XML encryptor configured` | Aviso benigno do DataProtection em desenvolvimento. | Ignorar em dev; configurar em produção. |
+
+**Criar o papel e o banco no PostgreSQL local** (alternativa ao Docker — foi o que usamos):
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE ROLE reflow WITH LOGIN PASSWORD 'reflow';
+CREATE DATABASE reflowoven OWNER reflow;
+GRANT ALL PRIVILEGES ON DATABASE reflowoven TO reflow;
+SQL
+```
+
+> Se o papel já existir, troque a 1ª linha por `ALTER ROLE reflow WITH LOGIN PASSWORD 'reflow';`. Se o
+> banco já existir, pule o `CREATE DATABASE`. Usuário/senha/banco devem bater com a _connection string_
+> em `appsettings.json`. Detalhes em [`docs/GUIA-DO-PROJETO.md`](./docs/GUIA-DO-PROJETO.md#9-solução-de-problemas).
+
 ## 📜 Comandos
 
 | Comando                                                | Descrição                              |
