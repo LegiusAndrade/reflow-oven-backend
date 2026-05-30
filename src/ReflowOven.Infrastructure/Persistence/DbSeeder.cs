@@ -1,7 +1,7 @@
 namespace ReflowOven.Infrastructure.Persistence;
 
 /// <summary>Idempotent first-run seeding (called after Database.Migrate). Mirrors the frontend defaults.</summary>
-public static class DbSeeder
+public static partial class DbSeeder
 {
     public static async Task SeedAsync(ReflowDbContext db, IPasswordHasher hasher, IClock clock, CancellationToken ct = default)
     {

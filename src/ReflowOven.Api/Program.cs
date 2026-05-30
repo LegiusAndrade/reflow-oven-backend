@@ -103,9 +103,16 @@ using (var scope = app.Services.CreateScope())
 {
     var sp = scope.ServiceProvider;
     var db = sp.GetRequiredService<ReflowDbContext>();
+    var clock = sp.GetRequiredService<IClock>();
     await db.Database.MigrateAsync();
-    await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), sp.GetRequiredService<IClock>());
+    await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock);
+    if (app.Configuration.GetValue<bool>("Seed:Demo"))
+        await DbSeeder.SeedDemoAsync(db, clock);
 }
+
+// Seed-only mode: `dotnet run -- seed-only` migrates + seeds and exits (no web server).
+if (args.Contains("seed-only"))
+    return;
 
 // --- Pipeline ---------------------------------------------------------------------------
 app.UseMiddleware<ExceptionMiddleware>();
