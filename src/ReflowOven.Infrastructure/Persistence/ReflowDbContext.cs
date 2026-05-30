@@ -76,6 +76,8 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(f => f.ProgramId).HasMaxLength(64);
             e.HasOne(f => f.User).WithMany().HasForeignKey(f => f.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(f => f.Program).WithMany().HasForeignKey(f => f.ProgramId).OnDelete(DeleteBehavior.Cascade);
+            // Match the principal's soft-delete filter so favorites of hidden programs drop out too.
+            e.HasQueryFilter(f => !f.Program!.IsDeleted);
         });
 
         b.Entity<ExecutionReport>(e =>
