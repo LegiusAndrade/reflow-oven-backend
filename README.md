@@ -13,6 +13,10 @@ vivo e armazena perfis, execuções, falhas e o histórico de alterações.
 Roda em um **Raspberry Pi / Orange Pi** e se comunica por **RS422** com a placa de potência baseada em
 **STM32** (abstraída — um simulador acompanha o projeto). A interface servida é em **pt-BR**.
 
+> O frontend já está **integrado** a esta API: ele consome os endpoints REST e os hubs SignalR
+> (sem mais `localStorage` _mock_). Veja a seção "Integração com o backend" em
+> [`../reflow-oven-front`](../reflow-oven-front).
+
 ## 🧰 Stack
 
 | Camada       | Tecnologia                                                        |
