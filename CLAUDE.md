@@ -1,0 +1,100 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Backend for a **reflow oven** (SMD solder-reflow) — the API/control service paired with the Next.js
+touchscreen frontend at `../reflow-oven-front`. It replaces that UI's `localStorage` mock with a real
+**ASP.NET Core (.NET 10) + EF Core + PostgreSQL** backend, drives a run, streams live telemetry, and
+persists profiles, runs, faults and audit history. It runs on a Raspberry/Orange Pi and talks to an
+STM32 power board over **RS422** (abstracted; a simulator ships by default).
+
+The UI it serves is **pt-BR**; C# identifiers are English. Several domain string literals are pt-BR
+and **part of the API contract** — see "Enums" below.
+
+## Commands
+
+The .NET 10 SDK is installed under `~/.dotnet` (not on the global PATH). Prefix shells with:
+
+```bash
+export DOTNET_ROOT="$HOME/.dotnet"; export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+```
+
+```bash
+docker compose up -d                              # start PostgreSQL (required to run/migrate-apply)
+dotnet build ReflowOven.slnx                      # build everything (note: .slnx, the new XML solution format)
+dotnet run --project src/ReflowOven.Api           # run API (migrates + seeds on startup); Swagger at /swagger
+dotnet test                                       # run all tests
+dotnet test --filter FullyQualifiedName~ProfileBuilderTests   # run one test class
+
+# EF Core migrations (design-time factory => no running host/DB needed to scaffold)
+dotnet ef migrations add <Name> -p src/ReflowOven.Infrastructure -s src/ReflowOven.Api -o Persistence/Migrations
+dotnet ef database update      -p src/ReflowOven.Infrastructure -s src/ReflowOven.Api   # needs Postgres up
+```
+
+`dotnet ef` is installed as a global tool. The migration **applies automatically on API startup**
+(`Database.MigrateAsync()` + `DbSeeder`), so normally you only run `migrations add`.
+
+Seeded dev login: any seeded user (e.g. `Lucas Silva`, admin) with password **`reflow1234`**, or the
+hidden technician `calibracao` / `calibra`. See `Application/Common/Defaults.cs`.
+
+## Architecture
+
+Clean Architecture, four projects + tests; dependencies point inward (Api → Infrastructure → Application → Domain):
+
+- **`ReflowOven.Domain`** — entities, enums, `DomainConstants` (the C# mirror of the frontend's
+  `limits.ts`), and the hardware/clock/telemetry abstractions (`IPowerBoard`, `IClock`, `ITelemetrySink`).
+  No external dependencies.
+- **`ReflowOven.Application`** — `IAppDbContext`, DTOs (the JSON contract), services
+  (`Auth/User/Program/Settings/Calibration/Report/Diagnostics/Maintenance/Device/Audit`), `ProfileBuilder`
+  (server-side port of the editor's `toProfile` + run interpolation), and `Defaults` (seed/factory data).
+- **`ReflowOven.Infrastructure`** — `ReflowDbContext` (+ all mapping inline in `OnModelCreating`),
+  EF migrations, `DbSeeder`, the power board (`SimulatedPowerBoard` default / `Rs422PowerBoard` stub),
+  `RunManager`, the `RunControlLoopService` background loop, JWT/BCrypt/clock/email implementations.
+- **`ReflowOven.Api`** — `Program.cs` wiring, controllers, the two SignalR hubs + `SignalRTelemetrySink`,
+  `CurrentUser` (reads JWT claims), and the ProblemDetails exception middleware.
+
+### Things that span multiple files
+
+- **Live run + telemetry.** `RunManager` (singleton) owns the one active run; `RunControlLoopService`
+  ticks it at 1 Hz. Each tick reads `IPowerBoard`, interpolates the setpoint (`alvo`) from the program
+  profile, classifies the phase, and pushes a `TraceSample` through `ITelemetrySink` →
+  `RunTelemetryHub` (`/hubs/telemetry`, per-run groups). When idle, the loop pushes sensor readings to
+  `DiagnosticsHub` (`/hubs/diagnostics`). On a terminal state the run is persisted as an `ExecutionReport`.
+  The board is fully abstracted — `SimulatedPowerBoard` interpolates the profile so telemetry is coherent
+  with no hardware; swap to `Rs422PowerBoard` via `Hardware:Mode=Rs422`.
+- **Enums are pt-BR text on the wire AND in the DB.** Enum members carry `[JsonStringEnumMemberName(...)]`
+  with the exact accented literal the frontend expects (`Concluído`, `Crítico`, `Parábola positiva`,
+  `Contínuo`, `Atenção`, …). A global `JsonStringEnumConverter` handles JSON; `PtBrEnumConverter<T>`
+  (applied to every non-JSON enum column in `OnModelCreating`) reads the *same* attribute so DB text and
+  JSON stay identical. **Never change these literals** without changing the frontend — they are the contract.
+- **Limits are a single source of truth.** `DomainConstants` mirrors `../reflow-oven-front/src/lib/limits.ts`
+  exactly. Enforce caps via the validators/services; keep the two files in lock-step.
+- **Soft-delete & audit.** Programs are soft-deleted (`IsDeleted` + a global query filter hides them and the
+  seeded catalog); everything else is hard-deleted. `AuditService` writes a `ChangeLogEntry` and bumps the
+  per-user activity counters on every program/config mutation.
+- **Auth.** JWT bearer, authenticated-by-default (fallback policy). `AdminOnly` guards writes; `CalibrationOnly`
+  (the `calibration` claim) guards the hidden Calibração endpoints. The technician login is config, not a
+  `User` row. SignalR takes the JWT from the `access_token` query string.
+- **Seeding / factory reset.** `Defaults` is the one source for the fault catalog (8), notification rows (11),
+  run-series prefs (7), default settings, the factory program and the ~50-program catalog. Both `DbSeeder`
+  and `MaintenanceService.FactoryResetAsync` use it.
+
+## API contract notes (differs from the frontend mock)
+
+Timestamps are sent as **ISO 8601** (or null), not pre-formatted strings — the client formats them
+(null `lastUsed` → "Nunca", null `lastLogin` → "—"). Login returns the frontend `{ ok, error }` shape with
+the exact pt-BR error strings. `Program` ids are slugs for seeds and GUID strings for new programs.
+
+## Conventions
+
+- **Commits in English** (subject + body), conventional-commit prefixes. **No `Co-Authored-By` / authorship
+  trailer.** Never commit/push without an explicit request. Active branch: **`develop`**
+  (remote: `github.com/LegiusAndrade/reflow-oven-backend`).
+- Match the surrounding style: file-scoped namespaces, primary constructors, expression-bodied members,
+  collection expressions (`[...]`), nullable enabled. Keep `GlobalUsings.cs` per project.
+- When adding an entity: map it in `ReflowDbContext.OnModelCreating`, add a `DbSet` to both `ReflowDbContext`
+  and `IAppDbContext`, then `migrations add`. Wide/read-whole data (curves, snapshots) is stored as `jsonb`
+  via `OwnsMany(...).ToJson()`; singletons (`Settings`, `Calibration`, `DeviceInfo`) use an `Id = 1` check
+  constraint.

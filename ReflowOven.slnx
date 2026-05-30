@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ReflowOven.Api/ReflowOven.Api.csproj" />
+    <Project Path="src/ReflowOven.Application/ReflowOven.Application.csproj" />
+    <Project Path="src/ReflowOven.Domain/ReflowOven.Domain.csproj" />
+    <Project Path="src/ReflowOven.Infrastructure/ReflowOven.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ReflowOven.Tests/ReflowOven.Tests.csproj" />
+  </Folder>
+</Solution>

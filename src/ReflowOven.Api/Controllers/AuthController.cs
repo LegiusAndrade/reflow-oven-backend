@@ -1,0 +1,28 @@
+using System.Security.Claims;
+
+namespace ReflowOven.Api.Controllers;
+
+[ApiController]
+[Route("api/auth")]
+public sealed class AuthController(AuthService auth) : ControllerBase
+{
+    [AllowAnonymous]
+    [HttpPost("login")]
+    public Task<LoginResult> Login([FromBody] LoginRequest req, CancellationToken ct) => auth.LoginAsync(req, ct);
+
+    [AllowAnonymous]
+    [HttpPost("forgot-password")]
+    public Task<OkResponse> ForgotPassword([FromBody] ForgotPasswordRequest req, CancellationToken ct) => auth.ForgotPasswordAsync(req, ct);
+
+    /// <summary>Reflects the JWT claims back as the frontend Session shape.</summary>
+    [HttpGet("me")]
+    public ActionResult<SessionDto> Me()
+    {
+        var id = User.FindFirst("sub")?.Value ?? "";
+        var name = User.FindFirst(ClaimTypes.Name)?.Value ?? "";
+        var role = Enum.TryParse<UserType>(User.FindFirst(ClaimTypes.Role)?.Value, out var r) ? r : UserType.Regular;
+        var calibration = User.HasClaim("calibration", "true");
+        var loginAt = long.TryParse(User.FindFirst("iat")?.Value, out var iat) ? iat * 1000 : 0;
+        return new SessionDto(id, name, role, loginAt, calibration ? true : null);
+    }
+}

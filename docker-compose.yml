@@ -1,0 +1,28 @@
+# PostgreSQL for local development of the Reflow Oven backend.
+#   docker compose up -d        # start
+#   docker compose down         # stop (keeps data volume)
+#   docker compose down -v      # stop and wipe data
+#
+# Connection string consumed by the API (see appsettings.json / .env):
+#   Host=localhost;Port=5432;Database=reflowoven;Username=reflow;Password=reflow
+services:
+  postgres:
+    image: postgres:18.4
+    container_name: reflowoven-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: reflowoven
+      POSTGRES_USER: reflow
+      POSTGRES_PASSWORD: reflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - reflowoven-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reflow -d reflowoven"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  reflowoven-pgdata:

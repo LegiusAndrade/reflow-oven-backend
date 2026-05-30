@@ -1,0 +1,36 @@
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text.Json.Serialization;
+
+namespace ReflowOven.Infrastructure.Persistence.Conversions;
+
+/// <summary>
+/// Maps enum values to/from the exact pt-BR wire string declared with
+/// <see cref="JsonStringEnumMemberNameAttribute"/> (falling back to the member name). Used by
+/// <see cref="PtBrEnumConverter{TEnum}"/> so DB text and JSON share one mapping. Reflection is cached.
+/// </summary>
+public static class EnumWire
+{
+    private static readonly ConcurrentDictionary<Type, (Dictionary<object, string> toWire, Dictionary<string, object> fromWire)> Cache = new();
+
+    private static (Dictionary<object, string> toWire, Dictionary<string, object> fromWire) MapsFor(Type enumType) =>
+        Cache.GetOrAdd(enumType, t =>
+        {
+            var to = new Dictionary<object, string>();
+            var from = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.Static))
+            {
+                var value = f.GetValue(null)!;
+                var wire = f.GetCustomAttribute<JsonStringEnumMemberNameAttribute>()?.Name ?? f.Name;
+                to[value] = wire;
+                from[wire] = value;
+            }
+            return (to, from);
+        });
+
+    public static string ToWire<TEnum>(TEnum value) where TEnum : struct, Enum =>
+        MapsFor(typeof(TEnum)).toWire[value];
+
+    public static TEnum FromWire<TEnum>(string wire) where TEnum : struct, Enum =>
+        MapsFor(typeof(TEnum)).fromWire.TryGetValue(wire, out var v) ? (TEnum)v : Enum.Parse<TEnum>(wire);
+}
