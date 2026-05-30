@@ -55,6 +55,8 @@ public sealed class CalibrationService(IAppDbContext db, IPowerBoard board)
         Check(d.CurrentGain, DomainConstants.CalibGainMin, DomainConstants.CalibGainMax, "Ganho");
         Check(d.FanPwmMin, DomainConstants.CalibPwmMin, DomainConstants.CalibPwmMax, "PWM mínimo");
         Check(d.FanPwmMax, DomainConstants.CalibPwmMin, DomainConstants.CalibPwmMax, "PWM máximo");
+        if (d.FanPwmMin > d.FanPwmMax)
+            throw new ValidationAppException("PWM mínimo não pode exceder o máximo.");
     }
 
     private static void Check(double value, double min, double max, string label)

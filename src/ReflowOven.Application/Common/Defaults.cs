@@ -125,16 +125,17 @@ public static class Defaults
     // --- Users (dev parity; password is hashed by the seeder) -----------------------------
     public sealed record SeedUser(string Name, string Email, UserType Type, UserStatus Status);
 
+    // Usernames must satisfy DomainConstants.UserNameRegex (letters/digits . _ - only — no spaces/specials).
     public static List<SeedUser> Users() =>
     [
-        new("Lucas Silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo),
-        new("Vanessa", "vanessa@reflow.local", UserType.Regular, UserStatus.Ativo),
-        new("Operador 1", "op1@reflow.local", UserType.Regular, UserStatus.Ativo),
-        new("Operador 2", "op2@reflow.local", UserType.Regular, UserStatus.Inativo),
+        new("lucas.silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo),
+        new("vanessa", "vanessa@reflow.local", UserType.Regular, UserStatus.Ativo),
+        new("operador1", "op1@reflow.local", UserType.Regular, UserStatus.Ativo),
+        new("operador2", "op2@reflow.local", UserType.Regular, UserStatus.Inativo),
     ];
 
     /// <summary>The single Admin kept after a factory reset.</summary>
-    public static SeedUser FactoryAdmin() => new("Lucas Silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo);
+    public static SeedUser FactoryAdmin() => new("lucas.silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo);
 
     // --- Programs (factory default + catalog) ---------------------------------------------
     public static ReflowProgram FactoryProgram() => Catalog(

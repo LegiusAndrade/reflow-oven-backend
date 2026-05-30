@@ -252,7 +252,7 @@ services:
    `AuthController.Login` ou `ProgramService.ListAsync`). Faça a chamada pelo **Swagger**
    (`http://localhost:5248/swagger`) e o VSCode vai **parar** na linha — você inspeciona variáveis,
    usa F10 (passo a passo) / F11 (entra no método) / F5 (continua).
-4. Para testar endpoints protegidos no Swagger: faça `POST /api/auth/login` (usuário `Lucas Silva`,
+4. Para testar endpoints protegidos no Swagger: faça `POST /api/auth/login` (usuário `lucas.silva`,
    senha `reflow1234`), copie o `token`, clique em **Authorize** (cadeado) e cole. Agora as chamadas vão autenticadas.
 5. Para depurar os **testes**: abra um arquivo de teste e use os ícones "Run/Debug Test" acima de cada
    `[Fact]` (com o C# Dev Kit), ou rode a tarefa **test**.

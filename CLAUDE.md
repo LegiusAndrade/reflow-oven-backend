@@ -36,7 +36,7 @@ dotnet ef database update      -p src/ReflowOven.Infrastructure -s src/ReflowOve
 `dotnet ef` is installed as a global tool. The migration **applies automatically on API startup**
 (`Database.MigrateAsync()` + `DbSeeder`), so normally you only run `migrations add`.
 
-Seeded dev login: any seeded user (e.g. `Lucas Silva`, admin) with password **`reflow1234`**, or the
+Seeded dev login: any seeded user (e.g. `lucas.silva`, admin) with password **`reflow1234`**, or the
 hidden technician `calibracao` / `calibra`. See `Application/Common/Defaults.cs`.
 
 ## Architecture

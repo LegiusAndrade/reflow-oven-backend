@@ -40,7 +40,7 @@ dotnet run --project src/ReflowOven.Api      # aplica migrations, faz o seed e s
 A API sobe em `https://localhost:5001` / `http://localhost:5000` (veja `Properties/launchSettings.json`).
 A documentação **Swagger** fica em `/swagger`. Health-check em `/health`.
 
-**Login de desenvolvimento:** qualquer usuário do seed (ex.: `Lucas Silva`, admin) com a senha
+**Login de desenvolvimento:** qualquer usuário do seed (ex.: `lucas.silva`, admin) com a senha
 `reflow1234`, ou o login técnico oculto `calibracao` / `calibra`.
 
 ## 🛠️ Solução de problemas (perrengues comuns)

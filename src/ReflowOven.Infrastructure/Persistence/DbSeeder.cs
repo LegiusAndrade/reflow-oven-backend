@@ -29,6 +29,10 @@ public static class DbSeeder
         if (!await db.Users.AnyAsync(ct))
         {
             foreach (var u in Defaults.Users())
+            {
+                // Defense in depth: seed data must obey the same username/email rules as the API.
+                Validation.ValidateUserName(u.Name);
+                Validation.ValidateEmail(u.Email);
                 db.Users.Add(new User
                 {
                     Id = Guid.NewGuid(),
@@ -39,6 +43,7 @@ public static class DbSeeder
                     Status = u.Status,
                     CreatedAt = clock.UtcNow,
                 });
+            }
         }
 
         await db.SaveChangesAsync(ct);
