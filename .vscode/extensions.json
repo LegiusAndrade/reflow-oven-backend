@@ -1,0 +1,7 @@
+{
+  // Extensões recomendadas (o VSCode oferece instalá-las ao abrir o projeto).
+  "recommendations": [
+    "ms-dotnettools.csdevkit",
+    "ms-dotnettools.csharp"
+  ]
+}

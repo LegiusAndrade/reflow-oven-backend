@@ -1,0 +1,32 @@
+{
+  // Tarefas usadas pelo debugger e pelo menu "Terminal > Run Task".
+  // Usamos o caminho absoluto do dotnet (~/.dotnet) porque o SDK não está no PATH global.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "command": "${env:HOME}/.dotnet/dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/ReflowOven.slnx",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "options": {
+        "env": { "DOTNET_ROOT": "${env:HOME}/.dotnet" }
+      },
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "test",
+      "command": "${env:HOME}/.dotnet/dotnet",
+      "type": "process",
+      "args": ["test", "${workspaceFolder}/ReflowOven.slnx"],
+      "options": { "env": { "DOTNET_ROOT": "${env:HOME}/.dotnet" } },
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    }
+  ]
+}

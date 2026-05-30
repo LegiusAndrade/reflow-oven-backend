@@ -1,0 +1,32 @@
+{
+  // F5 compila (preLaunchTask "build") e sobe a API com o debugger anexado.
+  // Coloque breakpoints clicando na margem esquerda de qualquer arquivo .cs.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug API (.NET 10)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/ReflowOven.Api/bin/Debug/net10.0/ReflowOven.Api.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/ReflowOven.Api",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ROOT": "${env:HOME}/.dotnet",
+        "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:PATH}"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)"
+      },
+      "console": "internalConsole"
+    },
+    {
+      "name": "Attach to process (.NET)",
+      "type": "coreclr",
+      "request": "attach"
+    }
+  ]
+}
