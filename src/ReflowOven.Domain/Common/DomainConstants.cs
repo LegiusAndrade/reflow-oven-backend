@@ -39,8 +39,15 @@ public static class DomainConstants
     public const int UserNameMaxLength = 40;
     public const int EmailMaxLength = 254;
 
-    /// <summary>Username: Unicode letters/digits plus . _ - only (no spaces/specials).</summary>
-    public const string UserNameRegex = @"^[\p{L}\p{N}._-]+$";
+    /// <summary>Username: Unicode letters/digits and the dot only — no spaces or other specials.</summary>
+    public const string UserNameRegex = @"^[\p{L}\p{N}.]+$";
+
+    /// <summary>DB-level (PostgreSQL POSIX) mirror of <see cref="UserNameRegex"/> — alnum + dot, no spaces.</summary>
+    public const string UserNameDbCheck = "^[[:alnum:].]+$";
+
+    /// <summary>Password length. Any character is allowed; 72 = BCrypt's effective byte limit.</summary>
+    public const int PasswordMinLength = 8;
+    public const int PasswordMaxLength = 72;
 
     /// <summary>Loose email shape mirroring the frontend's isValidEmail.</summary>
     public const string EmailRegex = @"^[^\s@]+@[^\s@]+\.[^\s@]+$";

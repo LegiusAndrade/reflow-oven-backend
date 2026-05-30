@@ -24,6 +24,7 @@ public sealed class UserService(IAppDbContext db, IPasswordHasher hasher, IClock
         Validation.ValidateEmail(email);
         if (string.IsNullOrEmpty(req.Password))
             throw new ValidationAppException("Informe uma senha.");
+        Validation.ValidatePassword(req.Password);
 
         var lower = name.ToLowerInvariant();
         if (await db.Users.AnyAsync(u => u.Name.ToLower() == lower, ct))
@@ -61,7 +62,10 @@ public sealed class UserService(IAppDbContext db, IPasswordHasher hasher, IClock
         user.Type = req.Type;
         user.Status = req.Status;
         if (!string.IsNullOrEmpty(req.Password))
+        {
+            Validation.ValidatePassword(req.Password);
             user.PasswordHash = hasher.Hash(req.Password);
+        }
 
         await audit.BumpActivityAsync(Defaults.ActivityLabels[2], ct); // usuários alterados
         await db.SaveChangesAsync(ct);

@@ -39,6 +39,8 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.HasKey(u => u.Id);
             e.Property(u => u.Name).HasMaxLength(DomainConstants.UserNameMaxLength).IsRequired();
             e.HasIndex(u => u.Name).IsUnique();
+            // DB-level guard: only letters/digits/dot (no spaces or other specials), even outside the app.
+            e.ToTable(t => t.HasCheckConstraint("CK_Users_Name", $"\"Name\" ~ '{DomainConstants.UserNameDbCheck}'"));
             e.Property(u => u.Email).HasMaxLength(DomainConstants.EmailMaxLength);
             e.Property(u => u.PasswordHash).HasMaxLength(100);
             e.HasMany(u => u.ActivityStats).WithOne(s => s.User!).HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
