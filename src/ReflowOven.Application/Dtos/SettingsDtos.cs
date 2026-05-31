@@ -36,6 +36,10 @@ public sealed record RunSeriesDto(
 
 public sealed record RunConfigDto(RunSeriesDto Series);
 
+/// <summary>Per-user UI preferences (theme + execution-chart series). Reuses <see cref="RunSeriesDto"/>
+/// so the chart-series shape matches the global Configurações exactly.</summary>
+public sealed record UserPreferencesDto(Theme Theme, RunSeriesDto ChartSeries);
+
 /// <summary>The full Configurações payload (used for both GET and PUT).</summary>
 public sealed record SettingsDto(
     PidDto Pid,

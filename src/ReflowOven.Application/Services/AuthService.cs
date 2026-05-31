@@ -79,7 +79,9 @@ public sealed class AuthService(
         }
 
         var tok = jwt.CreateForUser(user);
-        var dto = new SessionDto(user.Id.ToString(), user.Name, user.Type, tok.IssuedAtUnixMs, null, user.MustChangePassword ? true : null);
+        var prefs = UserService.MapPrefs(user.Preferences);
+        var dto = new SessionDto(user.Id.ToString(), user.Name, user.Type, tok.IssuedAtUnixMs, null,
+            user.MustChangePassword ? true : null, prefs.Theme, prefs.ChartSeries);
         return LoginResult.Success(tok.Token, tok.ExpiresAt, dto);
     }
 

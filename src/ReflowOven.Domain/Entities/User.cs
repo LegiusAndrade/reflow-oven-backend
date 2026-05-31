@@ -42,6 +42,27 @@ public class User
 
     /// <summary>Per-action activity counters shown in the user-detail modal (the 7 pt-BR labels).</summary>
     public ICollection<UserActivityStat> ActivityStats { get; set; } = new List<UserActivityStat>();
+
+    /// <summary>Per-user UI preferences (theme + execution-chart series). Owned/jsonb; follows the user across logins.</summary>
+    public UserPreferences Preferences { get; set; } = new();
+}
+
+/// <summary>
+/// A user's personal UI settings (replaces the front's per-session theme + the global chart-series
+/// config, so they follow the user across PCs/logins). Owned by <see cref="User"/>, stored as jsonb.
+/// The chart-series flags mirror <see cref="RunSeriesPreference"/> (the global defaults).
+/// </summary>
+public class UserPreferences
+{
+    public Theme Theme { get; set; } = Theme.System;
+
+    public bool Alvo { get; set; } = true;
+    public bool Oven { get; set; } = true;
+    public bool Board { get; set; }
+    public bool Current { get; set; } = true;
+    public bool Voltage { get; set; } = true;
+    public bool OvenFan { get; set; }
+    public bool BoardFan { get; set; }
 }
 
 /// <summary>

@@ -8,7 +8,15 @@ public sealed record LoginRequest(string Username, string Password);
 /// only for the hidden technician session and omitted otherwise. <c>MustChangePassword</c> is true
 /// while the user is still on the system-issued password (so the UI can prompt a change).
 /// </summary>
-public sealed record SessionDto(string Id, string Name, UserType Role, long LoginAt, bool? Calibration, bool? MustChangePassword = null);
+public sealed record SessionDto(
+    string Id,
+    string Name,
+    UserType Role,
+    long LoginAt,
+    bool? Calibration,
+    bool? MustChangePassword = null,
+    Theme Theme = Theme.System,
+    RunSeriesDto? ChartSeries = null);
 
 /// <summary>Authenticated self-service password change.</summary>
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

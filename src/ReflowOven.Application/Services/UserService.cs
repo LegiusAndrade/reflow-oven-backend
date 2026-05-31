@@ -94,6 +94,32 @@ public sealed class UserService(
         return Map(user);
     }
 
+    /// <summary>The user's personal UI preferences (theme + chart series).</summary>
+    public async Task<UserPreferencesDto> GetPreferencesAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new NotFoundException("Usuário não encontrado.");
+        return MapPrefs(user.Preferences);
+    }
+
+    public async Task<UserPreferencesDto> UpdatePreferencesAsync(Guid userId, UserPreferencesDto dto, CancellationToken ct = default)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new NotFoundException("Usuário não encontrado.");
+        var p = user.Preferences;
+        var s = dto.ChartSeries;
+        p.Theme = dto.Theme;
+        p.Alvo = s.Alvo; p.Oven = s.Oven; p.Board = s.Board; p.Current = s.Current;
+        p.Voltage = s.Voltage; p.OvenFan = s.OvenFan; p.BoardFan = s.BoardFan;
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Preferências atualizadas: '{Name}' (tema {Theme}).", user.Name, p.Theme);
+        return MapPrefs(p);
+    }
+
+    /// <summary>Maps the owned preferences to the DTO (chart series reuses <see cref="RunSeriesDto"/>).</summary>
+    internal static UserPreferencesDto MapPrefs(UserPreferences p) =>
+        new(p.Theme, new RunSeriesDto(p.Alvo, p.Oven, p.Board, p.Current, p.Voltage, p.OvenFan, p.BoardFan));
+
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct)

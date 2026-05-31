@@ -97,6 +97,14 @@ public enum LogLevel
     [JsonStringEnumMemberName("Erro")] Erro,
 }
 
+/// <summary>Per-user UI theme preference (frontend contract: lowercase wire literals).</summary>
+public enum Theme
+{
+    [JsonStringEnumMemberName("light")] Light,
+    [JsonStringEnumMemberName("dark")] Dark,
+    [JsonStringEnumMemberName("system")] System,
+}
+
 public enum NotificationKind
 {
     Normal,
