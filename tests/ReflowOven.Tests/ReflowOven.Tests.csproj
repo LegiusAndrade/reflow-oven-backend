@@ -12,6 +12,12 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- EF Core provider for SystemServiceAuditTests' in-memory ReflowDbContext.
+         InMemory (not SQLite) because the production model emits Postgres-specific DDL
+         (e.g. the `~` regex CHECK constraint) that SQLite rejects at EnsureCreated; InMemory
+         runs no DDL and still honours the soft-delete global query filter the audit relies on.
+         Version pinned to the EF Core 10 line used by the other projects. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.8" />
   </ItemGroup>
 
   <ItemGroup>
