@@ -9,3 +9,4 @@ global using ReflowOven.Domain.Abstractions;
 global using ReflowOven.Domain.Common;
 global using ReflowOven.Domain.Enums;
 global using ReflowOven.Domain.Hardware;
+global using ReflowOven.Domain.Platform;

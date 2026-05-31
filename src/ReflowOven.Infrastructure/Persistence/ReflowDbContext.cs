@@ -21,6 +21,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
 
     public DbSet<ChangeLogEntry> Changes => Set<ChangeLogEntry>();
     public DbSet<SystemLogEntry> SystemLog => Set<SystemLogEntry>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     public DbSet<Settings> Settings => Set<Settings>();
     public DbSet<NotificationSetting> NotificationSettings => Set<NotificationSetting>();
@@ -141,6 +142,15 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.HasIndex(x => x.At);
         });
 
+        b.Entity<Notification>(e =>
+        {
+            e.HasKey(n => n.Id);
+            e.Property(n => n.Title).HasMaxLength(120);
+            e.Property(n => n.Message).HasMaxLength(500);
+            e.HasIndex(n => n.At);
+            e.HasIndex(n => n.Read);
+        });
+
         b.Entity<Settings>(e =>
         {
             e.HasKey(s => s.Id);
@@ -210,4 +220,8 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             }
         }
     }
+
+    /// <summary>Real on-disk size of the database in bytes via PostgreSQL <c>pg_database_size</c>.</summary>
+    public async Task<long> GetDatabaseSizeBytesAsync(CancellationToken ct = default) =>
+        await Database.SqlQuery<long>($"SELECT pg_database_size(current_database()) AS \"Value\"").SingleAsync(ct);
 }

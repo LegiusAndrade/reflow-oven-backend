@@ -18,6 +18,8 @@ public static class DependencyInjection
         services.AddScoped<DiagnosticsService>();
         services.AddScoped<MaintenanceService>();
         services.AddScoped<DeviceService>();
+        services.AddScoped<SystemService>();
+        services.AddScoped<NotificationService>();
         return services;
     }
 }

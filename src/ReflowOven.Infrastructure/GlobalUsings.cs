@@ -6,3 +6,4 @@ global using ReflowOven.Domain.Common;
 global using ReflowOven.Domain.Entities;
 global using ReflowOven.Domain.Enums;
 global using ReflowOven.Domain.Hardware;
+global using ReflowOven.Domain.Platform;

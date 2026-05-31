@@ -5,7 +5,8 @@ namespace ReflowOven.Application.Services;
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
 public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock)
 {
-    /// <summary>Rough per-row byte estimate for the category sizes (real pg_total_relation_size is a TODO).</summary>
+    /// <summary>Rough per-row byte estimate for the per-category breakdown. The DB <b>total</b> below is the
+    /// real on-disk size (<c>pg_database_size</c>); only this category split remains an estimate.</summary>
     private const long BytesPerRecord = 512;
 
     public async Task<MaintenanceOverviewDto> OverviewAsync(CancellationToken ct = default)
@@ -24,7 +25,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             new(CleanupId.Logs, "Logs", logs, logs * BytesPerRecord),
             new(CleanupId.Inativos, "Usuários inativos", inativos, inativos * BytesPerRecord),
         };
-        var db_ = new DatabaseSizeDto(categories.Sum(c => c.Bytes), categories);
+        var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 
         var (freeGB, totalGB) = DiskSpace();
         return new MaintenanceOverviewDto(db_, freeGB, totalGB, RuntimeInformation.OSDescription, RuntimeInformation.RuntimeIdentifier);

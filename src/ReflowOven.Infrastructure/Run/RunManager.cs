@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ReflowOven.Application.Dtos;
 
 namespace ReflowOven.Infrastructure.Run;
@@ -12,7 +13,8 @@ public sealed class RunManager(
     IServiceScopeFactory scopeFactory,
     IPowerBoard board,
     ITelemetrySink sink,
-    IClock clock) : IRunManager
+    IClock clock,
+    ILogger<RunManager> logger) : IRunManager
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ActiveRun? _active;
@@ -48,7 +50,16 @@ public sealed class RunManager(
             program.LastUsed = clock.UtcNow;
             await db.SaveChangesAsync(ct);
 
-            await board.StartProgramAsync(profile, limits, ct);
+            try
+            {
+                await board.StartProgramAsync(profile, limits, ct);
+            }
+            catch (Exception ex)
+            {
+                // Board refused to start: leave _active null (no zombie run) and surface the failure.
+                logger.LogError(ex, "Falha ao iniciar o programa '{Program}' na placa.", program.Name);
+                throw;
+            }
 
             var run = new ActiveRun
             {
@@ -64,6 +75,8 @@ public sealed class RunManager(
                 Phase = RunPhase.Aquecimento,
             };
             _active = run;
+            logger.LogInformation("Execução iniciada: '{Program}' por '{User}' (run {RunId}, {Total}s).",
+                run.ProgramName, userName ?? "técnico", run.RunId, (int)run.TotalSeconds);
             await sink.PublishStatusAsync(run.RunId, RunStatus.Running);
             return BuildStatus(run);
         }
@@ -160,10 +173,22 @@ public sealed class RunManager(
         {
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
             db.Executions.Add(report);
+            db.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                At = endedAt,
+                Kind = status == RunStatus.Done ? NotificationFeedKind.Info : NotificationFeedKind.Error,
+                Title = status == RunStatus.Done ? "Execução concluída" : "Execução abortada",
+                Message = status == RunStatus.Done
+                    ? $"'{run.ProgramName}' concluída em {duration}s (pico {report.PeakTemp} °C)."
+                    : $"'{run.ProgramName}' foi abortada após {duration}s.",
+            });
             await db.SaveChangesAsync(ct);
         }
 
         _active = null;
+        logger.LogInformation("Execução finalizada ({Status}): '{Program}' (run {RunId}, {Duration}s, pico {Peak} °C).",
+            status, run.ProgramName, run.RunId, duration, report.PeakTemp);
         await sink.PublishStatusAsync(run.RunId, status);
         await sink.PublishCompletedAsync(run.RunId, report.Id);
     }

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ReflowOven.Infrastructure.Persistence;
@@ -12,9 +13,11 @@ using ReflowOven.Infrastructure.Persistence;
 namespace ReflowOven.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ReflowDbContext))]
-    partial class ReflowDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260531020103_AddNotificationFeed")]
+    partial class AddNotificationFeed
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -43,7 +46,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Role");
 
-                    b.ToTable("Boards", (string)null);
+                    b.ToTable("Boards");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.Calibration", b =>
@@ -68,7 +71,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Calibrations", null, t =>
+                    b.ToTable("Calibrations", t =>
                         {
                             t.HasCheckConstraint("CK_Calibration_SingleRow", "\"Id\" = 1");
                         });
@@ -114,7 +117,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("At");
 
-                    b.ToTable("Changes", (string)null);
+                    b.ToTable("Changes");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.DeviceInfo", b =>
@@ -146,7 +149,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DeviceInfo", null, t =>
+                    b.ToTable("DeviceInfo", t =>
                         {
                             t.HasCheckConstraint("CK_DeviceInfo_SingleRow", "\"Id\" = 1");
                         });
@@ -212,7 +215,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("FaultTypeCode");
 
-                    b.ToTable("Errors", (string)null);
+                    b.ToTable("Errors");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.ExecutionReport", b =>
@@ -267,7 +270,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("StartedAt");
 
-                    b.ToTable("Executions", (string)null);
+                    b.ToTable("Executions");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.FaultType", b =>
@@ -287,7 +290,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Code");
 
-                    b.ToTable("FaultTypes", (string)null);
+                    b.ToTable("FaultTypes");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.FavoriteProgram", b =>
@@ -303,7 +306,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProgramId");
 
-                    b.ToTable("Favorites", (string)null);
+                    b.ToTable("Favorites");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.LogEvent", b =>
@@ -341,7 +344,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ExecutionReportId");
 
-                    b.ToTable("LogEvents", (string)null);
+                    b.ToTable("LogEvents");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.Notification", b =>
@@ -376,7 +379,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Read");
 
-                    b.ToTable("Notifications", (string)null);
+                    b.ToTable("Notifications");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.NotificationSetting", b =>
@@ -415,7 +418,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SettingsId");
 
-                    b.ToTable("NotificationSettings", (string)null);
+                    b.ToTable("NotificationSettings");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.PasswordResetToken", b =>
@@ -442,7 +445,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("PasswordResetTokens", (string)null);
+                    b.ToTable("PasswordResetTokens");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.ReflowProgram", b =>
@@ -479,7 +482,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("IsDeleted");
 
-                    b.ToTable("Programs", (string)null);
+                    b.ToTable("Programs");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.RunSeriesPreference", b =>
@@ -495,7 +498,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasKey("SettingsId", "Signal");
 
-                    b.ToTable("RunSeriesPreferences", (string)null);
+                    b.ToTable("RunSeriesPreferences");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.Settings", b =>
@@ -505,7 +508,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Settings", null, t =>
+                    b.ToTable("Settings", t =>
                         {
                             t.HasCheckConstraint("CK_Settings_SingleRow", "\"Id\" = 1");
                         });
@@ -535,7 +538,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("At");
 
-                    b.ToTable("SystemLog", (string)null);
+                    b.ToTable("SystemLog");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.User", b =>
@@ -593,7 +596,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Users", null, t =>
+                    b.ToTable("Users", t =>
                         {
                             t.HasCheckConstraint("CK_Users_Name", "\"Name\" ~ '^[[:alnum:].]+$'");
                         });
@@ -623,7 +626,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId", "Label")
                         .IsUnique();
 
-                    b.ToTable("UserActivityStats", (string)null);
+                    b.ToTable("UserActivityStats");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.ChangeLogEntry", b =>
@@ -647,7 +650,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("ChangeLogEntryId", "__synthesizedOrdinal");
 
-                            b1.ToTable("Changes", (string)null);
+                            b1.ToTable("Changes");
 
                             b1
                                 .ToJson("Points")
@@ -677,7 +680,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("DeviceInfoId");
 
-                            b1.ToTable("DeviceInfo", (string)null);
+                            b1.ToTable("DeviceInfo");
 
                             b1.WithOwner()
                                 .HasForeignKey("DeviceInfoId");
@@ -703,7 +706,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("ErrorLogEntryId");
 
-                            b1.ToTable("Errors", (string)null);
+                            b1.ToTable("Errors");
 
                             b1
                                 .ToJson("Snapshot")
@@ -733,7 +736,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                                     b2.HasKey("FailureSnapshotErrorLogEntryId", "__synthesizedOrdinal");
 
-                                    b2.ToTable("Errors", (string)null);
+                                    b2.ToTable("Errors");
 
                                     b2.WithOwner()
                                         .HasForeignKey("FailureSnapshotErrorLogEntryId");
@@ -750,6 +753,31 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.ExecutionReport", b =>
                 {
+                    b.OwnsMany("ReflowOven.Domain.Entities.ExecProfilePoint", "Points", b1 =>
+                        {
+                            b1.Property<Guid>("ExecutionReportId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<int>("Kind");
+
+                            b1.Property<int>("T");
+
+                            b1.Property<int>("Temp");
+
+                            b1.HasKey("ExecutionReportId", "__synthesizedOrdinal");
+
+                            b1.ToTable("Executions");
+
+                            b1
+                                .ToJson("Points")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("ExecutionReportId");
+                        });
+
                     b.OwnsMany("ReflowOven.Domain.Entities.ProfileComparisonRow", "Comparison", b1 =>
                         {
                             b1.Property<Guid>("ExecutionReportId");
@@ -769,35 +797,10 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("ExecutionReportId", "__synthesizedOrdinal");
 
-                            b1.ToTable("Executions", (string)null);
+                            b1.ToTable("Executions");
 
                             b1
                                 .ToJson("Comparison")
-                                .HasColumnType("jsonb");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ExecutionReportId");
-                        });
-
-                    b.OwnsMany("ReflowOven.Domain.Entities.ExecProfilePoint", "Points", b1 =>
-                        {
-                            b1.Property<Guid>("ExecutionReportId");
-
-                            b1.Property<int>("__synthesizedOrdinal")
-                                .ValueGeneratedOnAdd();
-
-                            b1.Property<int>("Kind");
-
-                            b1.Property<int>("T");
-
-                            b1.Property<int>("Temp");
-
-                            b1.HasKey("ExecutionReportId", "__synthesizedOrdinal");
-
-                            b1.ToTable("Executions", (string)null);
-
-                            b1
-                                .ToJson("Points")
                                 .HasColumnType("jsonb");
 
                             b1.WithOwner()
@@ -880,7 +883,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("ReflowProgramId", "__synthesizedOrdinal");
 
-                            b1.ToTable("Programs", (string)null);
+                            b1.ToTable("Programs");
 
                             b1
                                 .ToJson("Profile")
@@ -905,7 +908,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("ReflowProgramId", "__synthesizedOrdinal");
 
-                            b1.ToTable("Programs", (string)null);
+                            b1.ToTable("Programs");
 
                             b1
                                 .ToJson("Segments")
@@ -966,7 +969,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("SettingsId");
 
-                            b1.ToTable("Settings", (string)null);
+                            b1.ToTable("Settings");
 
                             b1.WithOwner()
                                 .HasForeignKey("SettingsId");
@@ -985,7 +988,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("SettingsId");
 
-                            b1.ToTable("Settings", (string)null);
+                            b1.ToTable("Settings");
 
                             b1.WithOwner()
                                 .HasForeignKey("SettingsId");
@@ -1007,7 +1010,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("SettingsId");
 
-                            b1.ToTable("Settings", (string)null);
+                            b1.ToTable("Settings");
 
                             b1.WithOwner()
                                 .HasForeignKey("SettingsId");
@@ -1023,7 +1026,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("SettingsId");
 
-                            b1.ToTable("Settings", (string)null);
+                            b1.ToTable("Settings");
 
                             b1.WithOwner()
                                 .HasForeignKey("SettingsId");
@@ -1042,7 +1045,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("SettingsId");
 
-                            b1.ToTable("Settings", (string)null);
+                            b1.ToTable("Settings");
 
                             b1.WithOwner()
                                 .HasForeignKey("SettingsId");

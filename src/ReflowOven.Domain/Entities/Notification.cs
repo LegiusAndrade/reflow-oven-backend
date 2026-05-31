@@ -1,0 +1,25 @@
+using System.Text.Json.Serialization;
+
+namespace ReflowOven.Domain.Entities;
+
+/// <summary>Kind of a feed notification (matches the frontend bell: info / error / update).</summary>
+public enum NotificationFeedKind
+{
+    [JsonStringEnumMemberName("info")] Info,
+    [JsonStringEnumMemberName("error")] Error,
+    [JsonStringEnumMemberName("update")] Update,
+}
+
+/// <summary>
+/// A notification-feed event shown by the TopBar bell and the Notificações screen — distinct from the
+/// fixed <see cref="NotificationSetting"/> preferences. Raised by the run loop, the system monitor, etc.
+/// </summary>
+public class Notification
+{
+    public Guid Id { get; set; }
+    public DateTimeOffset At { get; set; }
+    public NotificationFeedKind Kind { get; set; }
+    public string Title { get; set; } = "";
+    public string Message { get; set; } = "";
+    public bool Read { get; set; }
+}

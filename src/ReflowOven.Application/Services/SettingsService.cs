@@ -1,7 +1,8 @@
 namespace ReflowOven.Application.Services;
 
-/// <summary>Reads/updates the Configurações singleton, audits config changes, and pushes control config to the board.</summary>
-public sealed class SettingsService(IAppDbContext db, IPowerBoard board, AuditService audit)
+/// <summary>Reads/updates the Configurações singleton, audits config changes, pushes control config to
+/// the board, and applies network changes to the OS (best-effort) via <see cref="ISystemController"/>.</summary>
+public sealed class SettingsService(IAppDbContext db, IPowerBoard board, ISystemController system, AuditService audit, ILogger<SettingsService> logger)
 {
     public async Task<SettingsDto> GetAsync(CancellationToken ct = default) => Map(await LoadAsync(ct));
 
@@ -11,6 +12,15 @@ public sealed class SettingsService(IAppDbContext db, IPowerBoard board, AuditSe
         var s = await LoadAsync(ct);
 
         var bullets = Diff(s, dto);
+
+        // Capture (pre-mutation) whether any OS-level network field changed, so we can re-apply it below.
+        var networkChanged =
+            s.Network.StaticIp != dto.Network.StaticIp ||
+            s.Network.Ip != dto.Network.Ip ||
+            s.Network.Mask != dto.Network.Mask ||
+            s.Network.Gateway != dto.Network.Gateway ||
+            s.Network.DnsPrimary != dto.Network.DnsPrimary ||
+            s.Network.DnsSecondary != dto.Network.DnsSecondary;
 
         s.Pid.P = dto.Pid.P;
         s.Pid.I = dto.Pid.I;
@@ -51,6 +61,25 @@ public sealed class SettingsService(IAppDbContext db, IPowerBoard board, AuditSe
         await db.SaveChangesAsync(ct);
 
         await board.ApplyControlConfigAsync(s, ct);
+
+        // Push the new network config to the OS. Best-effort: the settings are already persisted, so a
+        // failed apply (no privileges, no active connection, dev box) is logged but never fails the save.
+        if (networkChanged)
+        {
+            try
+            {
+                var current = await system.GetNetworkStatusAsync(ct);
+                var link = current.Link == NetworkLink.None ? NetworkLink.Cable : current.Link;
+                await system.ApplyNetworkConfigAsync(new OsNetworkConfig(
+                    s.Network.StaticIp, s.Network.Ip, s.Network.Mask, s.Network.Gateway,
+                    s.Network.DnsPrimary, s.Network.DnsSecondary, link), ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Configuração de rede salva, mas não foi aplicada no sistema operacional.");
+            }
+        }
+
         return Map(s);
     }
 

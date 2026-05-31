@@ -21,6 +21,7 @@ public interface IAppDbContext
 
     DbSet<ChangeLogEntry> Changes { get; }
     DbSet<SystemLogEntry> SystemLog { get; }
+    DbSet<Notification> Notifications { get; }
 
     DbSet<Settings> Settings { get; }
     DbSet<NotificationSetting> NotificationSettings { get; }
@@ -31,4 +32,7 @@ public interface IAppDbContext
     DbSet<Board> Boards { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
+
+    /// <summary>Real on-disk size of the database in bytes (PostgreSQL <c>pg_database_size</c>).</summary>
+    Task<long> GetDatabaseSizeBytesAsync(CancellationToken ct = default);
 }
