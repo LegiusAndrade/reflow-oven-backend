@@ -529,3 +529,47 @@ Regra: se `password` presente → `Validation.ValidatePassword(req.Password)` + 
 3. Para `Criado`/`Removido`, ok devolver `beforeCurve`/`afterCurve` como `[]` (ou omitir o campo)? O FE trata ausência/`[]` igualmente.
 4. Parâmetro de anterioridade: nome `before` (preferência do FE) ou `maxDate`? E semântica **exclusiva** (`<`) confirmada, para não reincluir a edição aberta?
 5. Manter `ChangePointRole`/o storage atual (consolidação só na leitura, **sem migração**) é aceitável, certo? Assim este item é puramente um refinamento de DTO + um filtro de query sobre o item H.
+
+### 7. Usuário Master (dev/superusuário) + aba "Log" do Diagnóstico
+
+**Necessidade:** O front ganhou uma aba **Diagnóstico → Log** (visor de log em tempo real) que deve ser
+visível **apenas** para um único usuário **Master** (dev) — "só vai ter ele e mais ninguém". O Master é um
+superusuário (poderes de Admin + a aba Log). Hoje o backend só tem os papéis `Admin`/`Regular`
+(`UserType`, `src/ReflowOven.Domain/Enums/Enums.cs:11-15`) e o claim de role no JWT
+(`JwtTokenService.cs:34`), sem nenhum conceito de Master.
+
+**Situação atual (front, já pronto):** `src/lib/api.ts` `Role = "Admin" | "Regular" | "Master"`; `src/lib/auth.ts`
+ganhou `canAdminister()` (Admin **ou** Master) e `isMaster()`; a aba Log (`DiagnosticoLog.tsx`) só aparece
+quando `session.role === "Master"`. O visor tem duas fontes: **Navegador** (buffer em memória do `logger`, não
+depende do backend) e **Sistema** (`GET /api/system-log` por polling a cada `SYSTEM_LOG_POLL_MS` = 2s). O front
+**já consome** o papel `Master` vindo no `SessionDto.role`/login — só falta o backend emiti-lo.
+
+**Proposta (backend):**
+1. **Papel Master no enum + JWT:** adicionar `Master` a `UserType` (`Enums.cs`) e emitir o claim `ClaimTypes.Role`
+   = `"Master"` para esse usuário (`JwtTokenService`). O `SessionDto.Role`/`LoginResult` já serializam o role
+   (`[JsonStringEnumMemberName]`), então o front recebe `"Master"` automaticamente. As policies `AdminOnly`
+   devem **aceitar Master também** (ex.: `RequireRole(Admin, Master)` na policy `AdminOnly`, ou criar
+   `MasterOnly` e fazer Admin-gates aceitarem os dois) — caso contrário o Master perde acessos de Admin.
+2. **Seed do usuário Master (só ele):** criar no `DbSeeder` **um** usuário Master fixo (ex.: `dev.pandewilly`),
+   senha definida em config/secrets (não hardcode em texto), **não** listável/編 editável pela tela de Usuários
+   (ou ao menos não removível) e **não** criável pela UI (o `CreateUserRequest.Type` segue só Admin/Regular).
+   Garantir idempotência (não duplicar em re-seed) e que ele sobreviva ao Reset de Fábrica (o reset "deixa 1
+   admin + 1 programa" — manter também o Master).
+3. **(Opcional, melhoria) Hub SignalR de push do log do sistema:** hoje a aba "Sistema" faz **polling** do
+   `GET /api/system-log` (2s). Para tempo real de verdade, expor um hub (ex.: `/hubs/systemlog`) que empurra
+   cada nova entrada de `SystemLog` (e idealmente as linhas do Serilog/HttpLogging) conforme são gravadas. O
+   front então troca o polling por uma assinatura SignalR (como já faz em diagnostics/telemetry). Sem isso, o
+   polling atual funciona — é só latência de ~2s.
+
+**Como o front vai consumir:** assim que o login/`/api/auth/me` retornar `role: "Master"` para a conta dev, a
+aba Log aparece sozinha (zero mudança adicional no front). Se o hub do item 3 existir, troco o `setInterval`
+de `SystemLog` por `conn.on("SystemLogEntry", ...)`.
+
+**Dúvidas/decisões (backend owner):**
+1. Nome/credencial do usuário Master (o front citou `dev.pandewilly` / `pandewilly`) e onde guardar a senha
+   (config/secret).
+2. `AdminOnly` deve passar a aceitar `Master` (recomendado, para o Master herdar tudo de Admin) ou criar um
+   `MasterOnly` separado e ajustar os gates?
+3. Implementar o hub de push do log agora (tempo real) ou manter o polling de 2s por enquanto?
+4. O log do **Navegador** é puramente client-side (efêmero). Se quiser que o log do dev seja **persistido**
+   server-side além do `SystemLog`, é um item à parte — confirmar se é desejado.
