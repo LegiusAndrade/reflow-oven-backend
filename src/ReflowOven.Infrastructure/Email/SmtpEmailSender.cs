@@ -29,6 +29,16 @@ public sealed class SmtpEmailSender(IOptions<EmailOptions> options, ILogger<Smtp
             $"<p>O prazo para trocar sua senha venceu em {wasDue:dd/MM/yyyy}. " +
             $"Acesse o programa e defina uma nova senha o quanto antes.</p>", ct);
 
+    public async Task SendDiskLowAsync(IEnumerable<string> adminEmails, double freePercent, double freeGB, double totalGB, CancellationToken ct = default)
+    {
+        var body =
+            $"<p><b>Atenção:</b> o espaço livre em disco do dispositivo está baixo.</p>" +
+            $"<p>Livre: <b>{freePercent:F0}%</b> ({freeGB:F1} GB de {totalGB:F1} GB).</p>" +
+            $"<p>Considere limpar dados antigos na tela de Manutenção.</p>";
+        foreach (var to in adminEmails.Where(e => !string.IsNullOrWhiteSpace(e)))
+            await SendAsync(to, "Espaço em disco crítico — Reflow Oven", body, ct);
+    }
+
     private async Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct)
     {
         var s = _o.Smtp;

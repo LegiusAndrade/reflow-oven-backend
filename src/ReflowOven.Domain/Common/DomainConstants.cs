@@ -77,6 +77,9 @@ public static class DomainConstants
     /// only the most recent.</summary>
     public const int NotificationFeedMax = 200;
 
+    /// <summary>Free-disk threshold (%) below which the system monitor warns (bell + e-mail to admins).</summary>
+    public const double DiskLowFreePercent = 10;
+
     // --- Diagnóstico (rankings) -----------------------------------------------------------
     public const int DiagRankMin = 3;
     public const int DiagRankMax = 10;

@@ -24,4 +24,11 @@ public sealed class StubEmailSender(ILogger<StubEmailSender> logger) : IEmailSen
             userName, email, wasDue);
         return Task.CompletedTask;
     }
+
+    public Task SendDiskLowAsync(IEnumerable<string> adminEmails, double freePercent, double freeGB, double totalGB, CancellationToken ct = default)
+    {
+        logger.LogInformation("[stub-email] Alerta de disco baixo para [{Admins}]: {Pct:F0}% livre ({Free:F1}/{Total:F1} GB)",
+            string.Join(", ", adminEmails), freePercent, freeGB, totalGB);
+        return Task.CompletedTask;
+    }
 }

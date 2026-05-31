@@ -45,4 +45,7 @@ public interface IEmailSender
 
     /// <summary>Reminder sent on login once the change deadline passed and the password is still the issued one.</summary>
     Task SendPasswordChangeReminderAsync(string email, string userName, DateTimeOffset wasDue, CancellationToken ct = default);
+
+    /// <summary>Alerts the device admins that free disk space crossed the low threshold.</summary>
+    Task SendDiskLowAsync(IEnumerable<string> adminEmails, double freePercent, double freeGB, double totalGB, CancellationToken ct = default);
 }
