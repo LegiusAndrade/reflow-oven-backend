@@ -85,12 +85,18 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
             ?? throw new NotFoundException("Programa não encontrado.");
 
         var (name, description, segments, profile) = Validate(req);
+
+        // Snapshot the previous curve as `changed-before` before overwriting, so the change-log
+        // carries the full antes×depois diff (the new curve follows as `changed-after`). The front
+        // filters the rows by Role to draw both curves.
+        var before = BuildPoints(program, ChangePointRole.ChangedBefore);
+
         program.Name = name;
         program.Description = description;
         program.Segments = segments;
         program.Profile = profile;
 
-        audit.RecordProgramChange(ChangeAction.Editado, program, BuildPoints(program, ChangePointRole.ChangedAfter));
+        audit.RecordProgramChange(ChangeAction.Editado, program, [.. before, .. BuildPoints(program, ChangePointRole.ChangedAfter)]);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[5], ct); // programas alterados
         await db.SaveChangesAsync(ct);
 

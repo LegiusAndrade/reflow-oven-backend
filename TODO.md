@@ -176,10 +176,13 @@ dropdown ("Filtrar por…") só funciona no cliente, sobre a página já carrega
 Falhas→`Errors`, Logs→`SystemLog`. "Usuários inativos" (subconjunto de linhas de `Users`) é rateado
 proporcionalmente. O total continua sendo o `pg_database_size` real.
 
-### ✅ H. Diff antes/depois em Alterações — **Fechado (diff por ponto basta)**
-`GET /api/changes/{id}` já traz `ConfigBullets` + `Points` (diff por ponto com `Role`
-add/removed/changed), que é suficiente para o front. Decidido **não** persistir os perfis inteiros
-`BeforeProfile`/`AfterProfile` — sem trabalho adicional.
+### ✅ H. Diff antes/depois em Alterações — **Feito (curva antes×depois por ponto)**
+`GET /api/changes/{id}` traz `ConfigBullets` + `Points` (diff por ponto com `Role`). Numa **edição**,
+o `ProgramService.UpdateAsync` agora grava a curva **anterior** como `changed-before` (snapshot tirado
+antes de sobrescrever o perfil) **e** a nova como `changed-after`, então o front desenha as duas curvas
+filtrando por `Role` (índices 1-based reiniciam por papel). Mantida a decisão de **não** persistir os
+perfis inteiros `BeforeProfile`/`AfterProfile`: reusa a coleção `Points` (jsonb) e o enum
+`ChangePointRole` já existentes — **sem migração**.
 
 ---
 

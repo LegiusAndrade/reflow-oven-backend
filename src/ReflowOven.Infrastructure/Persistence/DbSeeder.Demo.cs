@@ -234,16 +234,26 @@ public static partial class DbSeeder
 
         var action = (ChangeAction)(i % 3); // Criado | Editado | Removido
         var program = programs[i % programs.Count];
-        var role = action switch
+        var curve = program.Profile.Skip(1).Take(8).ToList();
+
+        List<ChangePointRow> Rows(ChangePointRole role, int tempDelta) =>
+            [.. curve.Select((p, k) => new ChangePointRow
+            {
+                Index = k + 1,
+                Temp = Math.Max(0, (int)Math.Round(p.Temp) + tempDelta),
+                TimeSec = (int)Math.Round(p.T),
+                Ramp = RampShape.Linear,
+                Role = role,
+            })];
+
+        // Editado carries an antes×depois diff (previous curve ~8 °C cooler) so the front can draw
+        // both curves; Criado/Removido carry the single added/removed curve.
+        var points = action switch
         {
-            ChangeAction.Criado => ChangePointRole.Added,
-            ChangeAction.Removido => ChangePointRole.Removed,
-            _ => ChangePointRole.ChangedAfter,
+            ChangeAction.Criado => Rows(ChangePointRole.Added, 0),
+            ChangeAction.Removido => Rows(ChangePointRole.Removed, 0),
+            _ => [.. Rows(ChangePointRole.ChangedBefore, -8), .. Rows(ChangePointRole.ChangedAfter, 0)],
         };
-        var points = new List<ChangePointRow>();
-        var idx = 1;
-        foreach (var p in program.Profile.Skip(1).Take(8))
-            points.Add(new ChangePointRow { Index = idx++, Temp = (int)Math.Round(p.Temp), TimeSec = (int)Math.Round(p.T), Ramp = RampShape.Linear, Role = role });
 
         return new ChangeLogEntry
         {
