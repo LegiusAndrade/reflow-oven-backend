@@ -45,7 +45,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
 
         var list = sorted.ToList();
         var page = Math.Max(1, q.Page);
-        var size = Math.Clamp(q.PageSize, 1, 100);
+        var size = Math.Clamp(q.PageSize, 1, DomainConstants.ProgramPageSizeMax);
         var items = list.Skip((page - 1) * size).Take(size).Select(p => Map(p, favSet.Contains(p.Id))).ToList();
         return new PagedResult<ProgramDto>(items, list.Count, page, size);
     }

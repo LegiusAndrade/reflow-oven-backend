@@ -129,7 +129,10 @@ public sealed class ReportService(IAppDbContext db)
         return new PagedResult<SystemLogDto>(items, total, page, size);
     }
 
-    private static (int page, int size) Paging(ReportQuery q) => (Math.Max(1, q.Page), Math.Clamp(q.PageSize, 1, 200));
+    // The page size is clamped server-side so a client can never pull an unbounded result set
+    // (e.g. "give me 1000 rows") and overload the service — at most ReportPageSizeMax rows.
+    private static (int page, int size) Paging(ReportQuery q) =>
+        (Math.Max(1, q.Page), Math.Clamp(q.PageSize, 1, DomainConstants.ReportPageSizeMax));
 
     private static LogEventDto MapEvent(LogEvent v) => new(v.At, v.Kind, v.Message);
 }

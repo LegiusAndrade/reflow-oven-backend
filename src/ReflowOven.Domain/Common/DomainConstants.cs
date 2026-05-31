@@ -34,6 +34,12 @@ public static class DomainConstants
     public const int ConfigVoltageMax = 300;
     public const int NetworkFieldMaxLength = 15;
 
+    /// <summary>Wi-Fi SSID max length (IEEE 802.11 caps an SSID at 32 bytes).</summary>
+    public const int WifiSsidMaxLength = 32;
+
+    /// <summary>WPA-PSK passphrase max length (63 chars; spaces/quotes are valid and not restricted).</summary>
+    public const int WifiPasswordMaxLength = 63;
+
     // --- Users ----------------------------------------------------------------------------
     public const int UserNameMinLength = 3;
     public const int UserNameMaxLength = 40;
@@ -49,8 +55,27 @@ public static class DomainConstants
     public const int PasswordMinLength = 8;
     public const int PasswordMaxLength = 72;
 
+    /// <summary>A new user must change the emailed password within this many days; after that, each
+    /// login resends the reminder email (login is still allowed).</summary>
+    public const int PasswordChangeWithinDays = 7;
+
+    /// <summary>Length of the system-generated initial password emailed to a new user.</summary>
+    public const int GeneratedPasswordLength = 14;
+
     /// <summary>Loose email shape mirroring the frontend's isValidEmail.</summary>
     public const string EmailRegex = @"^[^\s@]+@[^\s@]+\.[^\s@]+$";
+
+    // --- Paginação (proteção do serviço) --------------------------------------------------
+    /// <summary>Max rows a single Relatórios/log page may return; the server clamps to this even
+    /// if the client asks for more (so "me dá 1000 relatórios" never sobrecarrega o serviço).</summary>
+    public const int ReportPageSizeMax = 200;
+
+    /// <summary>Max rows a single Programas gallery page may return (server-clamped).</summary>
+    public const int ProgramPageSizeMax = 100;
+
+    /// <summary>Max notification-feed rows a single list call returns (server-clamped); the bell keeps
+    /// only the most recent.</summary>
+    public const int NotificationFeedMax = 200;
 
     // --- Diagnóstico (rankings) -----------------------------------------------------------
     public const int DiagRankMin = 3;
