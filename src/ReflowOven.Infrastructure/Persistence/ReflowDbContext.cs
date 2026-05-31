@@ -46,6 +46,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(u => u.Email).HasMaxLength(DomainConstants.EmailMaxLength);
             e.Property(u => u.PasswordHash).HasMaxLength(100);
             e.HasMany(u => u.ActivityStats).WithOne(s => s.User!).HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.OwnsOne(u => u.Preferences, p => p.ToJson());
         });
 
         b.Entity<UserActivityStat>(e =>
@@ -93,6 +94,11 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(x => x.PeakCurrent).HasPrecision(5, 1);
             e.OwnsMany(x => x.Points, o => o.ToJson());
             e.OwnsMany(x => x.Comparison, o => o.ToJson());
+            e.OwnsOne(x => x.Trace, s =>
+            {
+                s.ToJson();
+                s.OwnsMany(z => z.Series);
+            });
             e.HasMany(x => x.Events).WithOne(v => v.ExecutionReport!).HasForeignKey(v => v.ExecutionReportId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.StartedAt);
         });

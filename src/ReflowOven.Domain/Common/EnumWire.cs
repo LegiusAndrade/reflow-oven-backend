@@ -2,12 +2,14 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json.Serialization;
 
-namespace ReflowOven.Infrastructure.Persistence.Conversions;
+namespace ReflowOven.Domain.Common;
 
 /// <summary>
 /// Maps enum values to/from the exact pt-BR wire string declared with
-/// <see cref="JsonStringEnumMemberNameAttribute"/> (falling back to the member name). Used by
-/// <see cref="PtBrEnumConverter{TEnum}"/> so DB text and JSON share one mapping. Reflection is cached.
+/// <see cref="JsonStringEnumMemberNameAttribute"/> (falling back to the member name). Used by the
+/// EF value converter so DB text and JSON share one mapping, and by query-string filters that arrive
+/// as the wire literal (model binding would otherwise match the member name, not the attribute).
+/// Reflection is cached.
 /// </summary>
 public static class EnumWire
 {
@@ -33,4 +35,16 @@ public static class EnumWire
 
     public static TEnum FromWire<TEnum>(string wire) where TEnum : struct, Enum =>
         MapsFor(typeof(TEnum)).fromWire.TryGetValue(wire, out var v) ? (TEnum)v : Enum.Parse<TEnum>(wire);
+
+    /// <summary>Tolerant parse of a pt-BR wire literal; returns false (no throw) for an unknown value.</summary>
+    public static bool TryFromWire<TEnum>(string? wire, out TEnum value) where TEnum : struct, Enum
+    {
+        if (wire is not null && MapsFor(typeof(TEnum)).fromWire.TryGetValue(wire, out var v))
+        {
+            value = (TEnum)v;
+            return true;
+        }
+        value = default;
+        return false;
+    }
 }

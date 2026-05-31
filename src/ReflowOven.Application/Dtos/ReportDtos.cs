@@ -39,7 +39,8 @@ public sealed record ExecutionDetailDto(
     int? FaultAtTemp,
     IReadOnlyList<ExecProfilePointDto> Points,
     IReadOnlyList<ProfileComparisonRowDto> Comparison,
-    IReadOnlyList<LogEventDto> Events);
+    IReadOnlyList<LogEventDto> Events,
+    FailureSnapshotDto Trace);
 
 // --- errors -----------------------------------------------------------------------------
 public sealed record SnapshotSeriesDto(string Name, string Unit, string Color, double[] Values);
@@ -101,10 +102,19 @@ public sealed record FaultTypeDto(string Code, ErrorSeverity Severity, string Me
 
 public sealed record SystemLogDto(long Id, DateTimeOffset At, LogLevel Level, string Message);
 
-/// <summary>Common report list filters (search + date range, paged).</summary>
+/// <summary>
+/// Common report list filters (search + date range, paged) plus an optional per-tab category filter,
+/// applied server-side so server-paginated lists filter the whole set, not just the current page. Each
+/// category field carries the pt-BR wire literal of its enum (e.g. <c>status=Concluído</c>) and is
+/// ignored if unrecognized. <c>To</c> is treated as the end of that day (inclusive).
+/// </summary>
 public sealed record ReportQuery(
     string? Search = null,
     DateTimeOffset? From = null,
     DateTimeOffset? To = null,
     int Page = 1,
-    int PageSize = 10);
+    int PageSize = 10,
+    string? Status = null,
+    string? Action = null,
+    string? Severity = null,
+    string? Level = null);

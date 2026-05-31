@@ -13,7 +13,8 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(e => e.ProgramName.ToLower().Contains(s) || (e.UserName != null && e.UserName.ToLower().Contains(s)));
         }
         if (q.From is not null) query = query.Where(e => e.StartedAt >= q.From);
-        if (q.To is not null) query = query.Where(e => e.StartedAt <= q.To);
+        if (ToExclusive(q) is { } toExc) query = query.Where(e => e.StartedAt < toExc);
+        if (EnumWire.TryFromWire<ExecutionStatus>(q.Status, out var status)) query = query.Where(e => e.Status == status);
 
         var total = await query.CountAsync(ct);
         var (page, size) = Paging(q);
@@ -34,7 +35,8 @@ public sealed class ReportService(IAppDbContext db)
             e.PeakTemp, e.PeakCurrent, e.FaultAtT, e.FaultAtTemp,
             e.Points.Select(p => new ExecProfilePointDto(p.T, p.Temp, p.Kind)).ToList(),
             e.Comparison.Select(c => new ProfileComparisonRowDto(c.TempProg, c.TempReal, c.TimeProgSeconds, c.TimeRealSeconds, c.StageIndex)).ToList(),
-            e.Events.OrderBy(v => v.OrderIndex).ThenBy(v => v.At).Select(MapEvent).ToList());
+            e.Events.OrderBy(v => v.OrderIndex).ThenBy(v => v.At).Select(MapEvent).ToList(),
+            MapSnapshot(e.Trace));
     }
 
     // --- errors ---------------------------------------------------------------------------
@@ -47,7 +49,8 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(e => e.Message.ToLower().Contains(s) || e.FaultTypeCode.ToLower().Contains(s));
         }
         if (q.From is not null) query = query.Where(e => e.At >= q.From);
-        if (q.To is not null) query = query.Where(e => e.At <= q.To);
+        if (ToExclusive(q) is { } toExc) query = query.Where(e => e.At < toExc);
+        if (EnumWire.TryFromWire<ErrorSeverity>(q.Severity, out var severity)) query = query.Where(e => e.Severity == severity);
 
         var total = await query.CountAsync(ct);
         var (page, size) = Paging(q);
@@ -63,9 +66,7 @@ public sealed class ReportService(IAppDbContext db)
     {
         var e = await db.Errors.Include(x => x.Events).FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new NotFoundException("Falha não encontrada.");
-        var snap = new FailureSnapshotDto(
-            e.Snapshot.DurationSec,
-            e.Snapshot.Series.Select(sr => new SnapshotSeriesDto(sr.Name, sr.Unit, sr.Color, sr.Values)).ToList());
+        var snap = MapSnapshot(e.Snapshot);
         return new ErrorDetailDto(
             e.Id, e.At, e.FaultTypeCode, e.Severity, e.Message, e.UserId, e.UserName, e.ProgramId, e.ProgramName,
             e.OvenTemp, e.PcbTemp, e.StartAt, e.EndAt, e.InputVoltage, e.OutputVoltage, snap,
@@ -82,7 +83,8 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(c => c.Target.ToLower().Contains(s) || (c.UserName != null && c.UserName.ToLower().Contains(s)));
         }
         if (q.From is not null) query = query.Where(c => c.At >= q.From);
-        if (q.To is not null) query = query.Where(c => c.At <= q.To);
+        if (ToExclusive(q) is { } toExc) query = query.Where(c => c.At < toExc);
+        if (EnumWire.TryFromWire<ChangeAction>(q.Action, out var action)) query = query.Where(c => c.Action == action);
 
         var total = await query.CountAsync(ct);
         var (page, size) = Paging(q);
@@ -117,7 +119,8 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(l => l.Message.ToLower().Contains(s));
         }
         if (q.From is not null) query = query.Where(l => l.At >= q.From);
-        if (q.To is not null) query = query.Where(l => l.At <= q.To);
+        if (ToExclusive(q) is { } toExc) query = query.Where(l => l.At < toExc);
+        if (EnumWire.TryFromWire<LogLevel>(q.Level, out var level)) query = query.Where(l => l.Level == level);
 
         var total = await query.CountAsync(ct);
         var (page, size) = Paging(q);
@@ -134,5 +137,13 @@ public sealed class ReportService(IAppDbContext db)
     private static (int page, int size) Paging(ReportQuery q) =>
         (Math.Max(1, q.Page), Math.Clamp(q.PageSize, 1, DomainConstants.ReportPageSizeMax));
 
+    // Treat the inclusive 'To' date as the end of that day: filter strictly below the next midnight,
+    // so a yyyy-mm-dd value (which parses to 00:00) still includes rows from that whole day.
+    private static DateTimeOffset? ToExclusive(ReportQuery q) =>
+        q.To is { } to ? new DateTimeOffset(to.Date.AddDays(1), to.Offset) : null;
+
     private static LogEventDto MapEvent(LogEvent v) => new(v.At, v.Kind, v.Message);
+
+    private static FailureSnapshotDto MapSnapshot(FailureSnapshot s) =>
+        new(s.DurationSec, (s.Series ?? []).Select(sr => new SnapshotSeriesDto(sr.Name, sr.Unit, sr.Color, sr.Values)).ToList());
 }

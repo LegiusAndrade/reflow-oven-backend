@@ -37,6 +37,10 @@ public class ExecutionReport
     /// <summary>Per-stage programmed-vs-real comparison rows. Stored as jsonb.</summary>
     public List<ProfileComparisonRow> Comparison { get; set; } = new();
 
+    /// <summary>Downsampled multi-signal trace of the whole run (alvo/forno/dissipador/corrente/tensão/fans),
+    /// reusing the same shape as the fault snapshot so the chart renders identically. Owned/jsonb.</summary>
+    public FailureSnapshot Trace { get; set; } = new();
+
     /// <summary>Event timeline (shared table with ErrorLogEntry).</summary>
     public List<LogEvent> Events { get; set; } = new();
 }

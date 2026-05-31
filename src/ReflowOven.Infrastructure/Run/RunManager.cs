@@ -114,6 +114,7 @@ public sealed class RunManager(
 
             var sample = new TraceSample(elapsed, alvo, reading.OvenTempC, reading.BoardTempC, reading.CurrentA, reading.VoltageV, reading.OvenFanRpm, reading.BoardFanRpm);
             run.Last = sample;
+            run.Samples.Add(sample);
             run.PeakTemp = Math.Max(run.PeakTemp, reading.OvenTempC);
             run.PeakCurrent = Math.Max(run.PeakCurrent, reading.CurrentA);
             AppendMeasured(run, (int)Math.Round(elapsed), (int)Math.Round(reading.OvenTempC));
@@ -156,6 +157,7 @@ public sealed class RunManager(
             PeakCurrent = (decimal)Math.Round(run.PeakCurrent, 1),
             CreatedAt = endedAt,
             Points = BuildPoints(run),
+            Trace = BuildTrace(run, duration),
             Events =
             [
                 new LogEvent { At = run.StartedAt, Kind = LogEventKind.Info, Message = "Execução iniciada", OrderIndex = 0 },
@@ -202,6 +204,42 @@ public sealed class RunManager(
         return points;
     }
 
+    /// <summary>Downsamples the captured per-second samples into the fixed multi-signal snapshot the
+    /// report chart renders — same names/units/colors as the fault snapshot for visual consistency.</summary>
+    private static FailureSnapshot BuildTrace(ActiveRun run, int durationSec)
+    {
+        var samples = run.Samples;
+        if (samples.Count == 0) return new FailureSnapshot { DurationSec = durationSec, Series = [] };
+
+        var idx = DownsampleIndices(samples.Count, DomainConstants.SnapshotSamples);
+        double[] Pick(Func<TraceSample, double> sel) => idx.Select(i => Math.Round(sel(samples[i]), 2)).ToArray();
+
+        return new FailureSnapshot
+        {
+            DurationSec = durationSec,
+            Series =
+            [
+                new SnapshotSeries { Name = "Alvo", Unit = "°C", Color = "#93c5fd", Values = Pick(s => s.Alvo) },
+                new SnapshotSeries { Name = "Temp. Grelha", Unit = "°C", Color = "#fbbf24", Values = Pick(s => s.Oven) },
+                new SnapshotSeries { Name = "Temp. Dissipador", Unit = "°C", Color = "#a78bfa", Values = Pick(s => s.Board) },
+                new SnapshotSeries { Name = "Corrente", Unit = "A", Color = "#f87171", Values = Pick(s => s.Current) },
+                new SnapshotSeries { Name = "Tensão", Unit = "V", Color = "#22d3ee", Values = Pick(s => s.Voltage) },
+                new SnapshotSeries { Name = "Fan Forno", Unit = "rpm", Color = "#f472b6", Values = Pick(s => s.OvenFan) },
+                new SnapshotSeries { Name = "Fan Diss.", Unit = "rpm", Color = "#34d399", Values = Pick(s => s.BoardFan) },
+            ],
+        };
+    }
+
+    /// <summary>Evenly-spaced indices into a <paramref name="count"/>-length series, capped at
+    /// <paramref name="max"/> and always including the first and last sample.</summary>
+    private static int[] DownsampleIndices(int count, int max)
+    {
+        if (count <= max) return Enumerable.Range(0, count).ToArray();
+        var result = new int[max];
+        for (var i = 0; i < max; i++) result[i] = (int)((long)i * (count - 1) / (max - 1));
+        return result;
+    }
+
     private static void AppendMeasured(ActiveRun run, int t, int temp)
     {
         run.Measured.Add(new ExecProfilePoint { T = t, Temp = temp, Kind = ProfileRole.Measured });
@@ -235,5 +273,6 @@ public sealed class RunManager(
         public double PeakTemp { get; set; }
         public double PeakCurrent { get; set; }
         public List<ExecProfilePoint> Measured { get; set; } = [];
+        public List<TraceSample> Samples { get; } = [];
     }
 }
