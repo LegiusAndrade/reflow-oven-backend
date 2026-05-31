@@ -35,4 +35,8 @@ public interface IAppDbContext
 
     /// <summary>Real on-disk size of the database in bytes (PostgreSQL <c>pg_database_size</c>).</summary>
     Task<long> GetDatabaseSizeBytesAsync(CancellationToken ct = default);
+
+    /// <summary>Exact on-disk size of each table in bytes (PostgreSQL <c>pg_total_relation_size</c>: heap +
+    /// indexes + TOAST), keyed by table name. Used for the per-category Manutenção breakdown.</summary>
+    Task<IReadOnlyDictionary<string, long>> GetTableSizesBytesAsync(CancellationToken ct = default);
 }

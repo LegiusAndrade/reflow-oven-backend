@@ -5,8 +5,9 @@ namespace ReflowOven.Application.Services;
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
 public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock)
 {
-    /// <summary>Rough per-row byte estimate for the per-category breakdown. The DB <b>total</b> below is the
-    /// real on-disk size (<c>pg_database_size</c>); only this category split remains an estimate.</summary>
+    /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
+    /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
+    /// of <c>Users</c>) are sized proportionally; the DB total is the real <c>pg_database_size</c>.</summary>
     private const long BytesPerRecord = 512;
 
     public async Task<MaintenanceOverviewDto> OverviewAsync(CancellationToken ct = default)
@@ -16,14 +17,21 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var errors = await db.Errors.CountAsync(ct);
         var logs = await db.SystemLog.CountAsync(ct);
         var inativos = await db.Users.CountAsync(u => u.Status == UserStatus.Inativo, ct);
+        var totalUsers = await db.Users.CountAsync(ct);
+
+        var sizes = await db.GetTableSizesBytesAsync(ct);
+        long TableBytes(string table, int count) => sizes.TryGetValue(table, out var b) ? b : count * BytesPerRecord;
+        // Inactive users are a row subset of the Users table, so size them as their share of it.
+        var usersTable = sizes.TryGetValue("Users", out var ub) ? ub : totalUsers * BytesPerRecord;
+        var inativosBytes = totalUsers > 0 ? (long)Math.Round(usersTable * (double)inativos / totalUsers) : 0;
 
         var categories = new List<CategorySizeDto>
         {
-            new(CleanupId.Execucoes, "Execuções", exec, exec * BytesPerRecord),
-            new(CleanupId.Alteracoes, "Alterações", changes, changes * BytesPerRecord),
-            new(CleanupId.Falhas, "Falhas", errors, errors * BytesPerRecord),
-            new(CleanupId.Logs, "Logs", logs, logs * BytesPerRecord),
-            new(CleanupId.Inativos, "Usuários inativos", inativos, inativos * BytesPerRecord),
+            new(CleanupId.Execucoes, "Execuções", exec, TableBytes("Executions", exec)),
+            new(CleanupId.Alteracoes, "Alterações", changes, TableBytes("Changes", changes)),
+            new(CleanupId.Falhas, "Falhas", errors, TableBytes("Errors", errors)),
+            new(CleanupId.Logs, "Logs", logs, TableBytes("SystemLog", logs)),
+            new(CleanupId.Inativos, "Usuários inativos", inativos, inativosBytes),
         };
         var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 

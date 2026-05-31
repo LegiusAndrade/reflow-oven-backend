@@ -64,7 +64,7 @@ banco (`pg_database_size`).
 > **Legenda:** ⛔ falta implementar no backend · 🟡 parcial/opcional · ✅ pronto.
 > A coluna `feBlocked` indica se o item **bloqueia** o front (o front não consegue a parte dele sem isso).
 >
-> **Resumo:** ⛔ a implementar → **A, B, C, D, E, F** · 🟡 opcional → **G, H**.
+> **Resumo:** ⛔ a implementar → **A, B, C, D, E, F** · ✅ feitos → **G** (tamanho por categoria), **H** (diff por ponto basta).
 
 ### ✅ Já prontos no backend (o front só precisa consumir)
 Itens que o usuário achava que "faltavam" mas **já estão implementados** (não entram na lista abaixo):
@@ -150,16 +150,16 @@ dropdown ("Filtrar por…") só funciona no cliente, sobre a página já carrega
 > Sem isso, a paginação no servidor dos relatórios filtraria só a página atual (errado). A paginação
 > de **Programas** não depende disso — já tem `search/filter/sort/page/pageSize` no backend.
 
-### 🟡 G. (Opcional) Tamanho do banco **por categoria** exato
-`pg_database_size` (total) já é **real**; o tamanho **por categoria** na tela de Manutenção é
-**estimado** (rateio por contagem de linhas). Se precisar exato, usar `pg_total_relation_size` por
-tabela. Não bloqueia nada.
+### ✅ G. Tamanho do banco **por categoria** exato — **Feito**
+`MaintenanceService` agora usa o tamanho **exato** de cada tabela via `pg_total_relation_size`
+(`IAppDbContext.GetTableSizesBytesAsync`): Execuções→`Executions`, Alterações→`Changes`,
+Falhas→`Errors`, Logs→`SystemLog`. "Usuários inativos" (subconjunto de linhas de `Users`) é rateado
+proporcionalmente. O total continua sendo o `pg_database_size` real.
 
-### 🟡 H. (Opcional) Diff completo antes/depois em Alterações
+### ✅ H. Diff antes/depois em Alterações — **Fechado (diff por ponto basta)**
 `GET /api/changes/{id}` já traz `ConfigBullets` + `Points` (diff por ponto com `Role`
-add/removed/changed). Se o gráfico antes×depois precisar reconstruir os **dois perfis inteiros** com
-fidelidade (não só add/removed), gravar `BeforeProfile`/`AfterProfile` (jsonb) em `ChangeLogEntry` no
-momento da mutação (`ProgramService`). Se o diff por ponto atual basta, **já está pronto**.
+add/removed/changed), que é suficiente para o front. Decidido **não** persistir os perfis inteiros
+`BeforeProfile`/`AfterProfile` — sem trabalho adicional.
 
 ---
 

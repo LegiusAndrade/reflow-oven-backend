@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ReflowOven.Infrastructure.Persistence.Conversions;
 
@@ -224,4 +225,29 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
     /// <summary>Real on-disk size of the database in bytes via PostgreSQL <c>pg_database_size</c>.</summary>
     public async Task<long> GetDatabaseSizeBytesAsync(CancellationToken ct = default) =>
         await Database.SqlQuery<long>($"SELECT pg_database_size(current_database()) AS \"Value\"").SingleAsync(ct);
+
+    /// <summary>Exact per-table size in bytes via <c>pg_total_relation_size</c>, keyed by table name.</summary>
+    public async Task<IReadOnlyDictionary<string, long>> GetTableSizesBytesAsync(CancellationToken ct = default)
+    {
+        var sizes = new Dictionary<string, long>();
+        var conn = Database.GetDbConnection();
+        var wasClosed = conn.State != ConnectionState.Open;
+        if (wasClosed) await conn.OpenAsync(ct);
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT c.relname, pg_total_relation_size(c.oid) " +
+                "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+                "WHERE n.nspname = 'public' AND c.relkind = 'r'";
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                sizes[reader.GetString(0)] = reader.GetInt64(1);
+        }
+        finally
+        {
+            if (wasClosed) await conn.CloseAsync();
+        }
+        return sizes;
+    }
 }
