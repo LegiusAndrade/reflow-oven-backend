@@ -12,13 +12,16 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options, IClock clock) 
     /// <summary>Custom claim present only for the hidden technician session.</summary>
     public const string CalibrationClaim = "calibration";
 
+    /// <summary>Custom claim: the user is still on the system-issued password and should change it.</summary>
+    public const string MustChangeClaim = "must_change_password";
+
     public TokenResult CreateForUser(User user) =>
-        Create(user.Id.ToString(), user.Name, user.Type.ToString(), calibration: false);
+        Create(user.Id.ToString(), user.Name, user.Type.ToString(), calibration: false, mustChangePassword: user.MustChangePassword);
 
     public TokenResult CreateForCalibration() =>
-        Create("calibration", "Calibração", nameof(UserType.Admin), calibration: true);
+        Create("calibration", "Calibração", nameof(UserType.Admin), calibration: true, mustChangePassword: false);
 
-    private TokenResult Create(string subject, string name, string role, bool calibration)
+    private TokenResult Create(string subject, string name, string role, bool calibration, bool mustChangePassword)
     {
         var o = options.Value;
         var now = clock.UtcNow;
@@ -33,6 +36,8 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options, IClock clock) 
         };
         if (calibration)
             claims.Add(new Claim(CalibrationClaim, "true"));
+        if (mustChangePassword)
+            claims.Add(new Claim(MustChangeClaim, "true"));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(o.SigningKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

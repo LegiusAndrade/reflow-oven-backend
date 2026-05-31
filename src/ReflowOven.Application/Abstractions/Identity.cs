@@ -35,8 +35,14 @@ public interface IJwtTokenService
     TokenResult CreateForCalibration();
 }
 
-/// <summary>Sends the password-reset email. Stubbed (logs) until real SMTP is wired.</summary>
+/// <summary>Sends transactional emails. Stub (logs) by default; real SMTP via <c>Email:Mode=Smtp</c>.</summary>
 public interface IEmailSender
 {
     Task SendPasswordResetAsync(string email, string resetToken, CancellationToken ct = default);
+
+    /// <summary>Welcome email with the system-generated password and the deadline to change it.</summary>
+    Task SendNewUserAsync(string email, string userName, string tempPassword, DateTimeOffset changeBy, CancellationToken ct = default);
+
+    /// <summary>Reminder sent on login once the change deadline passed and the password is still the issued one.</summary>
+    Task SendPasswordChangeReminderAsync(string email, string userName, DateTimeOffset wasDue, CancellationToken ct = default);
 }

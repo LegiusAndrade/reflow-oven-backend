@@ -28,6 +28,18 @@ public class User
     /// <summary>Lifetime successful-login count (feeds the Diagnóstico "top users by logins" ranking).</summary>
     public long LoginCount { get; set; }
 
+    /// <summary>True from creation until the user changes the password that was emailed to them.</summary>
+    public bool MustChangePassword { get; set; }
+
+    /// <summary>When the current system-issued password was set — anchors the change deadline.</summary>
+    public DateTimeOffset? PasswordIssuedAt { get; set; }
+
+    /// <summary>When the user last set their own password (null = still on the issued one).</summary>
+    public DateTimeOffset? PasswordChangedAt { get; set; }
+
+    /// <summary>Last "please change your password" reminder we emailed (throttle: at most once a day).</summary>
+    public DateTimeOffset? LastPasswordReminderAt { get; set; }
+
     /// <summary>Per-action activity counters shown in the user-detail modal (the 7 pt-BR labels).</summary>
     public ICollection<UserActivityStat> ActivityStats { get; set; } = new List<UserActivityStat>();
 }

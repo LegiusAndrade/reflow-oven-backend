@@ -1,7 +1,9 @@
 namespace ReflowOven.Application.Services;
 
 /// <summary>CRUD for users (Usuários tab). Name is unique (case-insensitive) and immutable after create.</summary>
-public sealed class UserService(IAppDbContext db, IPasswordHasher hasher, IClock clock, AuditService audit)
+public sealed class UserService(
+    IAppDbContext db, IPasswordHasher hasher, IClock clock, AuditService audit,
+    ICurrentUser current, IEmailSender emailSender, ILogger<UserService> logger)
 {
     public async Task<IReadOnlyList<UserDto>> ListAsync(CancellationToken ct = default)
     {
@@ -22,27 +24,43 @@ public sealed class UserService(IAppDbContext db, IPasswordHasher hasher, IClock
         Validation.ValidateUserName(name);
         var email = (req.Email ?? "").Trim();
         Validation.ValidateEmail(email);
-        if (string.IsNullOrEmpty(req.Password))
-            throw new ValidationAppException("Informe uma senha.");
-        Validation.ValidatePassword(req.Password);
 
         var lower = name.ToLowerInvariant();
         if (await db.Users.AnyAsync(u => u.Name.ToLower() == lower, ct))
             throw new ConflictException("Já existe um usuário com esse nome.");
+
+        // The system generates the initial password and emails it; the admin never sets or sees it.
+        // The user must change it within PasswordChangeWithinDays (enforced softly at login).
+        var tempPassword = PasswordGenerator.Generate();
+        var now = clock.UtcNow;
+        var changeBy = now.AddDays(DomainConstants.PasswordChangeWithinDays);
 
         var user = new User
         {
             Id = Guid.NewGuid(),
             Name = name,
             Email = email,
-            PasswordHash = hasher.Hash(req.Password),
+            PasswordHash = hasher.Hash(tempPassword),
             Type = req.Type,
             Status = req.Status,
-            CreatedAt = clock.UtcNow,
+            CreatedAt = now,
+            MustChangePassword = true,
+            PasswordIssuedAt = now,
         };
         db.Users.Add(user);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[1], ct); // usuários criados
         await db.SaveChangesAsync(ct);
+        logger.LogInformation("Usuário criado: '{Name}' ({Type}) por '{Actor}'.", user.Name, user.Type, current.Name);
+
+        // Best-effort: an email failure must not fail the creation (the user row already exists).
+        try
+        {
+            await emailSender.SendNewUserAsync(user.Email, user.Name, tempPassword, changeBy, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Usuário '{Name}' criado, mas o e-mail de boas-vindas falhou para '{Email}'.", user.Name, user.Email);
+        }
         return Map(user);
     }
 
@@ -65,10 +83,14 @@ public sealed class UserService(IAppDbContext db, IPasswordHasher hasher, IClock
         {
             Validation.ValidatePassword(req.Password);
             user.PasswordHash = hasher.Hash(req.Password);
+            // An admin deliberately set a known password — clear the forced-change cycle.
+            user.MustChangePassword = false;
+            user.PasswordChangedAt = clock.UtcNow;
         }
 
         await audit.BumpActivityAsync(Defaults.ActivityLabels[2], ct); // usuários alterados
         await db.SaveChangesAsync(ct);
+        logger.LogInformation("Usuário atualizado: '{Name}' ({Type}/{Status}) por '{Actor}'.", user.Name, user.Type, user.Status, current.Name);
         return Map(user);
     }
 
@@ -83,6 +105,7 @@ public sealed class UserService(IAppDbContext db, IPasswordHasher hasher, IClock
         db.Users.Remove(user);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[3], ct); // usuários deletados
         await db.SaveChangesAsync(ct);
+        logger.LogInformation("Usuário removido: '{Name}' por '{Actor}'.", user.Name, current.Name);
     }
 
     /// <summary>True when <paramref name="userId"/> is an active admin and no other active admin exists.</summary>
