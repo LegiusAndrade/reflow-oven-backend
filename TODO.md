@@ -64,7 +64,9 @@ banco (`pg_database_size`).
 > **Legenda:** ⛔ falta implementar no backend · 🟡 parcial/opcional · ✅ pronto.
 > A coluna `feBlocked` indica se o item **bloqueia** o front (o front não consegue a parte dele sem isso).
 >
-> **Resumo:** ⛔ a implementar → **A, B, C, D, E, F** · ✅ feitos → **G** (tamanho por categoria), **H** (diff por ponto basta).
+> **Resumo:** ✅ **A–H todos implementados** nesta rodada (A prefs por usuário, B ping-porta/interfaces/prioridade,
+> C trace multi-sinal por execução, D alerta de disco, E logging HTTP com payload, F filtros server-side dos
+> relatórios, G tamanho por categoria, H diff por ponto). Detalhe de cada um abaixo (com "Feito:").
 
 ### ✅ Já prontos no backend (o front só precisa consumir)
 Itens que o usuário achava que "faltavam" mas **já estão implementados** (não entram na lista abaixo):
@@ -75,7 +77,10 @@ Itens que o usuário achava que "faltavam" mas **já estão implementados** (nã
 - **Tamanho real do banco/HD** — `pg_database_size` no `MaintenanceService`; HD via `DeviceService`.
 - **Paginação no servidor** — `page/pageSize` com clamp (200/200/100); falta só o front paginar por tela.
 
-### ⛔ A. Preferências do usuário (tema + séries do gráfico) por usuário — feBlocked
+### ✅ A. Preferências do usuário (tema + séries do gráfico) por usuário — **Feito**
+**Feito:** owned jsonb `User.Preferences` (enum `Theme` light/dark/system + 7 flags espelhando `RunSeriesPreference`);
+`GET/PUT /api/me/preferences` (escopado pelo JWT, bloqueia técnico); embutido no login e em `/api/auth/me` para
+hidratar o tema no boot; migration `AddUserPreferences` com backfill dos defaults corretos.
 Hoje o tema só vive na sessão do front e as séries do gráfico de execução são uma **config global**
 (`Settings.RunSeries`), não por usuário. O usuário quer que o tema e as legendas/séries **sigam o
 usuário** entre PCs/logins.
@@ -87,7 +92,10 @@ usuário** entre PCs/logins.
   já no boot, sem flash).
 - Migration EF Core nova.
 
-### ⛔ B. Rede: ping com **porta**, listar interfaces e escolher a **prioritária** — feBlocked p/ esses campos
+### ✅ B. Rede: ping com **porta**, listar interfaces e escolher a **prioritária** — **Feito**
+**Feito:** `PingRequest.Port` opcional → probe TCP (latência do handshake) quando há porta, senão ICMP;
+`GET /api/system/interfaces` (`ListInterfacesAsync`, enum `InterfaceKind` Ethernet/WiFi); `POST /api/system/interfaces/priority`
+(`AdminOnly`, nmcli `autoconnect-priority`). Simulado + Linux implementados.
 A aba Rede do front precisa de três coisas que o backend ainda não expõe (confirmado lendo as rotas de
 `SystemController` — existem hoje: `GET/PUT /api/system/network`, `GET /api/system/wifi`,
 `POST /api/system/wifi/connect`, `GET /api/system/connectivity`, time/ntp, update, reboot/shutdown):
@@ -102,7 +110,10 @@ A aba Rede do front precisa de três coisas que o backend ainda não expõe (con
 > Obs.: o **medium** (wifi vs cabo) para o ícone da TopBar e o status do **servidor central**
 > (`GET /api/system/connectivity`) para o ícone do globo **já existem** — falta só o front consumir.
 
-### ⛔ C. Trace **multi-sinal** persistido por execução — feBlocked
+### ✅ C. Trace **multi-sinal** persistido por execução — **Feito**
+**Feito:** `ExecutionReport.Trace` (mesmo `FailureSnapshot` do erro, jsonb); o `RunManager` acumula as amostras
+por tick e, ao finalizar, faz downsample (`SnapshotSamples`) em 7 séries (alvo/forno/dissipador/corrente/tensão/2 fans)
+reusando a paleta do snapshot de erro; exposto em `ExecutionDetailDto.Trace`; migration `AddExecutionTrace`.
 O relatório de execução só guarda **temperatura** (`ExecutionReport.Points` = T/Temp/Kind). O usuário
 quer o gráfico do relatório com **corrente, tensão, RPM, temperatura do dissipador, etc.** ao longo do
 tempo. O trace ao vivo (`TraceSampleDto`: alvo/forno/placa/corrente/tensão/fans) trafega no
@@ -114,7 +125,10 @@ tempo. O trace ao vivo (`TraceSampleDto`: alvo/forno/placa/corrente/tensão/fans
   (`GET /api/executions/{id}` ou `GET /api/executions/{id}/trace`).
 - Migration EF Core nova.
 
-### ⛔ D. Alerta de **pouco espaço em disco**: e-mail + aviso na tela — feBlocked
+### ✅ D. Alerta de **pouco espaço em disco**: e-mail + aviso na tela — **Feito**
+**Feito:** `DomainConstants.DiskLowFreePercent` (10%); o `SystemMonitorService` checa o disco a cada poll com
+detecção de **cruzamento** do limiar (sem spam, re-arma ao recuperar) e dispara notificação no sino +
+`IEmailSender.SendDiskLowAsync` aos admins ativos (best-effort).
 Há base mas falta tudo que junta: o disco real já está disponível (`DeviceService` /
 `SystemMetrics.DiskFreeGB`/`DiskTotalGB`), e o e-mail (`SmtpEmailSender`/MailKit) + o **feed de
 notificações** já funcionam. **Falta criar** o limiar (ex.: `DomainConstants.DiskLowFreePercent`, hoje
@@ -127,7 +141,10 @@ notificações** já funcionam. **Falta criar** o limiar (ex.: `DomainConstants.
   real**, hoje em modo stub).
 - Opcional: tornar o limiar configurável em `Settings`.
 
-### ⛔ E. Logging de **GET/SET com payload** (auditoria server-side) — não bloqueia o front
+### ✅ E. Logging de **GET/SET com payload** (auditoria server-side) — **Feito**
+**Feito:** `AddHttpLogging` (request/response com método/path/query/status/duração + corpo, limite 4 KB) ligado
+em **dev**; `AuthRedactionInterceptor` descarta o corpo de `/api/auth/*` (sem vazar senha/token — verificado);
+override do Serilog para a categoria `HttpLogging` em dev. (A auditoria de mutação `ChangeLogEntry` já existia.)
 Já existe auditoria de mutação (`AuditService` grava `ChangeLogEntry` + log) e `ExceptionMiddleware`
 (só erros). **Não há** logging de request/response (grep por `AddHttpLogging`/`UseHttpLogging` = nada);
 GETs não são logados e o UPDATE só registra o *diff*, não o payload recebido.
@@ -136,7 +153,10 @@ GETs não são logados e o UPDATE só registra o *diff*, não o payload recebido
 - Estender a auditoria de UPDATE para gravar o payload **before/after** completo (reaproveitar
   `AuditService`/`ChangeLogEntry`). Definir **retenção** com limite.
 
-### ⛔ F. Filtros server-side dos Relatórios (para paginação server-side correta) — feBlocked p/ paginação dos relatórios
+### ✅ F. Filtros server-side dos Relatórios — **Feito**
+**Feito:** `ReportQuery` ganhou `Status/Action/Severity/Level` (literais pt-BR, parseados por `EnumWire.TryFromWire`,
+inválido ignorado), aplicados **antes** de `CountAsync`/`Skip`/`Take` em cada relatório; `To` tratado como **fim do dia**.
+O `EnumWire` foi movido para `Domain.Common` (compartilhado entre as camadas).
 Para mover a tela **Relatórios** para paginação no servidor sem quebrar os filtros, o `ReportQuery`
 (`Search/From/To/Page/PageSize`) precisa ganhar o **filtro por categoria** de cada aba — hoje esse
 dropdown ("Filtrar por…") só funciona no cliente, sobre a página já carregada.

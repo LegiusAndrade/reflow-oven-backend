@@ -131,3 +131,24 @@ the exact pt-BR error strings. `Program` ids are slugs for seeds and GUID string
   and `IAppDbContext`, then `migrations add`. Wide/read-whole data (curves, snapshots) is stored as `jsonb`
   via `OwnsMany(...).ToJson()`; singletons (`Settings`, `Calibration`, `DeviceInfo`) use an `Id = 1` check
   constraint.
+
+## API & security guidelines
+
+These hold across the API; follow them when adding or changing endpoints.
+
+- **DTOs in, DTOs out.** Every endpoint takes and returns a typed DTO (`Application/Dtos`), never an entity.
+  Login already uses a request/response pair (`LoginRequest` → `LoginResult`); keep that shape. **Validate**
+  incoming data (lengths/ranges/required) in the service before persisting.
+- **Strong typing, async, REST.** No `object`/`dynamic` on the wire; use `async`/`await` for all I/O; keep
+  REST conventions and consistent names. Don't rename/restructure existing endpoints without a real need.
+- **Separation of concerns.** Controllers are thin: they call Application **services** and never touch
+  `IAppDbContext`/EF directly. DB access lives in services (or the run/system background services via a scope).
+- **Never expose or hardcode secrets.** Output DTOs must never carry a password or hash (`UserDto` doesn't).
+  The **JWT signing key is never hardcoded**: it comes from config/env (`Jwt__SigningKey`) or user-secrets;
+  `Program.cs` *fails fast* if a non-Development run is left on the empty/dev-placeholder key. The committed
+  `appsettings.json` values (dev DB password, the `dev-only-change-me…` key, technician creds) are
+  **dev-only placeholders** — set real secrets via environment in production.
+- **Auth.** Authenticated-by-default (fallback policy) is the project's `RequireAuthorization()`; only
+  `login`/`forgot-password`/`health`/Scalar are `AllowAnonymous`. Guard writes with `AdminOnly`
+  (and `CalibrationOnly` for Calibração). Token minting is centralized in `JwtTokenService` — never build a
+  JWT elsewhere (`Program.cs` only uses the key to *validate*).

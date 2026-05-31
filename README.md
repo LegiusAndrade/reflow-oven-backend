@@ -101,11 +101,11 @@ tests/
 
 REST sob `/api` (autenticado por padrão; `AdminOnly` para escritas; `CalibrationOnly` para a calibração):
 
-- `auth` (login/me/forgot-password/change-password) · `programs` (+ `favorite`) · `runs` (start/stop/status)
-- `executions` · `errors` · `changes` · `system-log` · `fault-types` (Relatórios)
-- `settings` · `calibration` (+ `wizard`) · `network/ping`
+- `auth` (login/me/forgot-password/change-password) · `me/preferences` (tema + séries por usuário) · `programs` (+ `favorite`) · `runs` (start/stop/status)
+- `executions` (detalhe inclui o trace multi-sinal) · `errors` · `changes` · `system-log` · `fault-types` — Relatórios com filtro server-side (`?status/action/severity/level`)
+- `settings` · `calibration` (+ `wizard`) · `network/ping` (com `port` opcional → TCP)
 - `diagnostics` (overview/readings/self-test) · `maintenance` (overview/cleanup/factory-reset) · `device`
-- `system` (status/metrics/network/wifi/time/ntp/update/connectivity/reboot/shutdown — OS do OrangePi) · `notifications` (feed do sininho)
+- `system` (status/metrics/network/wifi/interfaces/time/ntp/update/connectivity/reboot/shutdown — OS do OrangePi) · `notifications` (feed do sininho)
 
 Tempo real (JWT via `?access_token=`):
 
