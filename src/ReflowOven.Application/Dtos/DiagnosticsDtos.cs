@@ -25,9 +25,9 @@ public sealed record DiagnosticsOverviewDto(
 /// <summary>Live sensor readings (Diagnóstico → Sensores), also pushed over the diagnostics hub.</summary>
 public sealed record SensorReadingsDto(
     double BoardTempC,
-    double BoardFanRpm,
+    int BoardFanRpm,
     double OvenTempC,
-    double OvenFanRpm,
+    int OvenFanRpm,
     double VoltageV,
     double CurrentA)
 {

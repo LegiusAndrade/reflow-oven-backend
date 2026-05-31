@@ -31,8 +31,8 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
         var board = Clamp(Wander(28 + oven * 0.16, 1.5), 0, 200);
         var current = Clamp(Wander(running ? oven / 300.0 * 14 : 0, 1), 0, 60);
         var voltage = Clamp(Wander(current * 13, 2), 0, 250);
-        var ovenFan = ToStep(Clamp(Wander(running ? 1000 + oven / 300.0 * 4000 : 1500, 60), 0, 6000), 10);
-        var boardFan = ToStep(Clamp(Wander(800 + board / 200.0 * 4000, 60), 0, 6000), 10);
+        var ovenFan = (int)ToStep(Clamp(Wander(running ? 1000 + oven / 300.0 * 4000 : 1500, 60), 0, 6000), 10);
+        var boardFan = (int)ToStep(Clamp(Wander(800 + board / 200.0 * 4000, 60), 0, 6000), 10);
 
         return Task.FromResult(new SensorReadings(board, boardFan, oven, ovenFan, voltage, current));
     }

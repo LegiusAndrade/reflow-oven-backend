@@ -10,8 +10,8 @@ public sealed record TraceSampleDto(
     double Board,
     double Current,
     double Voltage,
-    double OvenFan,
-    double BoardFan)
+    int OvenFan,
+    int BoardFan)
 {
     public static TraceSampleDto From(TraceSample s) =>
         new(s.T, s.Alvo, s.Oven, s.Board, s.Current, s.Voltage, s.OvenFan, s.BoardFan);

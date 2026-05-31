@@ -6,9 +6,9 @@ namespace ReflowOven.Domain.Hardware;
 /// </summary>
 public readonly record struct SensorReadings(
     double BoardTempC,
-    double BoardFanRpm,
+    int BoardFanRpm,
     double OvenTempC,
-    double OvenFanRpm,
+    int OvenFanRpm,
     double VoltageV,
     double CurrentA);
 
@@ -23,8 +23,8 @@ public readonly record struct TraceSample(
     double Board,
     double Current,
     double Voltage,
-    double OvenFan,
-    double BoardFan);
+    int OvenFan,
+    int BoardFan);
 
 /// <summary>Process safety limits handed to the board for a run (from Settings).</summary>
 public readonly record struct ProcessLimits(
