@@ -16,5 +16,5 @@ public sealed class MeController(ICurrentUser current, UserService users) : Cont
 
     // The hidden technician session has no User row, so it has no stored preferences.
     private Guid RequireUserId() =>
-        current.UserId ?? throw new ForbiddenAppException("Preferências indisponíveis para a sessão técnica.");
+        current.UserId ?? throw new ForbiddenAppException("A sessão técnica não tem autorização para acessar ou alterar preferências de usuário.");
 }

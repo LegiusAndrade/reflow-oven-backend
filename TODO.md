@@ -213,3 +213,18 @@ front espelha `100` em `limits.ts` e mostra `x/100` + tempo total.
   ```
   dotnet ef migrations add AddFaultTypes -p src/ReflowOven.Infrastructure -s src/ReflowOven.Api -o Persistence/Migrations
   ```
+
+## Pendentes (adicionados pelo usuário)
+
+### ⛔ J. Programa de teste com +10 edições (relatório de Alterações)
+Criar no BD um programa **editado ~12×** para exercitar o relatório de Alterações e ver a retenção
+(`ChangeRetentionPerProgramMax = 10`) cortando para as 10 mais recentes. Fazer via `DbSeeder.Demo`
+(ou script pontual) gerando um `ReflowProgram` + uma sequência de `ChangeLogEntry` com diff por ponto.
+
+### ✅ K. Técnico de calibração ao trocar tema → 403 com mensagem de autorização — **Feito**
+**Já era tratado** (não é crash): `MeController.RequireUserId()` lança `ForbiddenAppException`,
+mapeada pelo `ExceptionMiddleware` para **403 ProblemDetails**. Ajustada só a **mensagem** para deixar
+a falta de autorização explícita: *"A sessão técnica não tem autorização para acessar ou alterar
+preferências de usuário."* (cobre o GET e o PUT de `/api/me/preferences`). O "break" no VSCode é o aviso
+de *first-chance exception* (mesma situação do item #3) — desmarcar "All Exceptions" em Run and Debug →
+BREAKPOINTS. Opcional no front: não oferecer troca de tema na sessão técnica.
