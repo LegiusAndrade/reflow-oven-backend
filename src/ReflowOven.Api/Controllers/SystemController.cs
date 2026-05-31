@@ -100,6 +100,9 @@ public sealed class SystemController(SystemService system) : ControllerBase
         return NoContent();
     }
 
+    // The audit returns a full census of the database (user/program/run/fault/notification/log
+    // counts) — operational data meant for administrators, so it is AdminOnly like the mutations.
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
     [HttpGet("audit")]
     public Task<DatabaseAuditDto> Audit(CancellationToken ct) => system.GetDatabaseAuditAsync(ct);
 }
