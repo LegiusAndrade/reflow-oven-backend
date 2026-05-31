@@ -125,6 +125,37 @@ public sealed class LinuxSystemController(
         logger.LogInformation("Wi-Fi conectado: '{Ssid}'.", ssid);
     }
 
+    public async Task<IReadOnlyList<NetworkInterfaceInfo>> ListInterfacesAsync(CancellationToken ct = default)
+    {
+        var res = await ProcessRunner.RunAsync("nmcli", "-t -f DEVICE,TYPE,STATE device", ct);
+        var list = new List<NetworkInterfaceInfo>();
+        foreach (var line in res.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var p = line.Split(':');
+            if (p.Length < 3) continue;
+            InterfaceKind? kind = p[1] switch { "ethernet" => InterfaceKind.Ethernet, "wifi" => InterfaceKind.WiFi, _ => null };
+            if (kind is null) continue;
+            var up = p[2] == "connected";
+            var ip = up ? (await NmcliFieldAsync(ct, "-g", "IP4.ADDRESS", "device", "show", p[0])).Split('/')[0] : "";
+            list.Add(new NetworkInterfaceInfo(p[0], kind.Value, up, ip));
+        }
+        return list;
+    }
+
+    public async Task SetPriorityInterfaceAsync(string interfaceName, CancellationToken ct = default)
+    {
+        var conn = await ActiveConnectionAsync(interfaceName, ct);
+        if (conn.Length == 0)
+        {
+            logger.LogWarning("SetPriorityInterface: nenhuma conexão ativa em {Iface}.", interfaceName);
+            return;
+        }
+        // Higher autoconnect-priority wins; bump this connection and bring it up so it becomes preferred.
+        await NmcliAsync(ct, "connection", "modify", conn, "connection.autoconnect-priority", "100");
+        await NmcliAsync(ct, "connection", "up", conn);
+        logger.LogInformation("Interface prioritária: {Iface} ({Conn}).", interfaceName, conn);
+    }
+
     // --- time / NTP ---------------------------------------------------------------------------
     public async Task<TimeStatus> GetTimeStatusAsync(CancellationToken ct = default)
     {

@@ -35,6 +35,17 @@ public readonly record struct NetworkStatus(
 /// <summary>A Wi-Fi network seen by a scan.</summary>
 public readonly record struct WifiNetwork(string Ssid, int SignalPercent, bool Secured, bool Active);
 
+/// <summary>Kind of a network interface (named to avoid colliding with <see cref="NetworkLink"/>).</summary>
+public enum InterfaceKind
+{
+    [JsonStringEnumMemberName("Ethernet")] Ethernet,
+    [JsonStringEnumMemberName("WiFi")] WiFi,
+}
+
+/// <summary>A network interface on the device (named <c>…Info</c> to avoid colliding with
+/// <c>System.Net.NetworkInformation.NetworkInterface</c>).</summary>
+public readonly record struct NetworkInterfaceInfo(string Name, InterfaceKind Kind, bool Up, string Ip);
+
 /// <summary>Clock / NTP state.</summary>
 public readonly record struct TimeStatus(DateTimeOffset Now, string Timezone, bool NtpSynchronized, bool NtpEnabled);
 
@@ -68,6 +79,12 @@ public interface ISystemController
     Task ApplyNetworkConfigAsync(OsNetworkConfig config, CancellationToken ct = default);
     Task<IReadOnlyList<WifiNetwork>> ScanWifiAsync(CancellationToken ct = default);
     Task ConnectWifiAsync(string ssid, string? password, CancellationToken ct = default);
+
+    /// <summary>All network interfaces (cable/Wi-Fi, up/down, address).</summary>
+    Task<IReadOnlyList<NetworkInterfaceInfo>> ListInterfacesAsync(CancellationToken ct = default);
+
+    /// <summary>Make <paramref name="interfaceName"/> the preferred (highest-priority) interface.</summary>
+    Task SetPriorityInterfaceAsync(string interfaceName, CancellationToken ct = default);
 
     Task<TimeStatus> GetTimeStatusAsync(CancellationToken ct = default);
     Task SetTimeAsync(DateTimeOffset time, CancellationToken ct = default);

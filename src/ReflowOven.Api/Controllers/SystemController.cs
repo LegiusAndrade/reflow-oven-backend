@@ -40,6 +40,17 @@ public sealed class SystemController(SystemService system) : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("interfaces")]
+    public Task<IReadOnlyList<NetworkInterfaceDto>> Interfaces(CancellationToken ct) => system.InterfacesAsync(ct);
+
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [HttpPost("interfaces/priority")]
+    public async Task<IActionResult> SetPriorityInterface([FromBody] SetPriorityInterfaceRequest req, CancellationToken ct)
+    {
+        await system.SetPriorityInterfaceAsync(req, ct);
+        return NoContent();
+    }
+
     [HttpGet("time")]
     public Task<TimeStatusDto> Time(CancellationToken ct) => system.TimeAsync(ct);
 

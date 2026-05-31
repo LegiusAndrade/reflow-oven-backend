@@ -22,5 +22,5 @@ public sealed class DiagnosticsController(DiagnosticsService diagnostics) : Cont
 public sealed class NetworkController(DiagnosticsService diagnostics) : ControllerBase
 {
     [HttpPost("ping")]
-    public Task<PingResultDto> Ping([FromBody] PingRequest req, CancellationToken ct) => diagnostics.PingAsync(req.Host, ct);
+    public Task<PingResultDto> Ping([FromBody] PingRequest req, CancellationToken ct) => diagnostics.PingAsync(req.Host, req.Port, ct);
 }

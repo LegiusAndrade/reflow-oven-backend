@@ -36,6 +36,12 @@ public sealed record WifiNetworkDto(string Ssid, int SignalPercent, bool Secured
     public static WifiNetworkDto From(WifiNetwork w) => new(w.Ssid, w.SignalPercent, w.Secured, w.Active);
 }
 
+/// <summary>A network interface (cable/Wi-Fi, up/down, address). <c>Kind</c> serializes to "Ethernet"/"WiFi".</summary>
+public sealed record NetworkInterfaceDto(string Name, InterfaceKind Kind, bool Up, string Ip)
+{
+    public static NetworkInterfaceDto From(NetworkInterfaceInfo i) => new(i.Name, i.Kind, i.Up, i.Ip);
+}
+
 public sealed record TimeStatusDto(DateTimeOffset Now, string Timezone, bool NtpSynchronized, bool NtpEnabled)
 {
     public static TimeStatusDto From(TimeStatus t) => new(t.Now, t.Timezone, t.NtpSynchronized, t.NtpEnabled);
@@ -72,6 +78,8 @@ public sealed record ApplyNetworkRequest(
     NetworkLink PreferredLink);
 
 public sealed record ConnectWifiRequest(string Ssid, string? Password);
+
+public sealed record SetPriorityInterfaceRequest(string InterfaceName);
 
 public sealed record SetTimeRequest(DateTimeOffset Time);
 

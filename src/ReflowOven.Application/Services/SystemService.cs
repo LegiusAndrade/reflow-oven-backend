@@ -44,6 +44,16 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
     public async Task<IReadOnlyList<WifiNetworkDto>> ScanWifiAsync(CancellationToken ct = default) =>
         (await system.ScanWifiAsync(ct)).Select(WifiNetworkDto.From).ToList();
 
+    public async Task<IReadOnlyList<NetworkInterfaceDto>> InterfacesAsync(CancellationToken ct = default) =>
+        (await system.ListInterfacesAsync(ct)).Select(NetworkInterfaceDto.From).ToList();
+
+    public Task SetPriorityInterfaceAsync(SetPriorityInterfaceRequest req, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.InterfaceName))
+            throw new ValidationAppException("Informe a interface.");
+        return system.SetPriorityInterfaceAsync(req.InterfaceName, ct);
+    }
+
     public Task ConnectWifiAsync(ConnectWifiRequest req, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(req.Ssid))

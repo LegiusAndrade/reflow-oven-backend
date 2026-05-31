@@ -45,19 +45,42 @@ public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board)
     public async Task<SelfTestResultDto> SelfTestAsync(SelfTestId id, CancellationToken ct = default) =>
         SelfTestResultDto.From(await board.RunSelfTestAsync(id, ct));
 
-    public async Task<PingResultDto> PingAsync(string host, CancellationToken ct = default)
+    public async Task<PingResultDto> PingAsync(string host, int? port = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(host))
             throw new ValidationAppException("Informe um host.");
+        var target = host.Trim();
+
+        // With a port, probe a TCP connect (handshake latency) — useful to test a specific service/port.
+        if (port is { } p)
+        {
+            if (p is < 1 or > 65535)
+                throw new ValidationAppException("Porta inválida (1..65535).");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                using var tcp = new System.Net.Sockets.TcpClient();
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(2));
+                await tcp.ConnectAsync(target, p, cts.Token);
+                sw.Stop();
+                return new PingResultDto(tcp.Connected, Math.Round(sw.Elapsed.TotalMilliseconds, 1), target);
+            }
+            catch
+            {
+                return new PingResultDto(false, 0, target);
+            }
+        }
+
         try
         {
             using var ping = new Ping();
-            var reply = await ping.SendPingAsync(host.Trim(), TimeSpan.FromSeconds(2));
-            return new PingResultDto(reply.Status == IPStatus.Success, reply.RoundtripTime, host.Trim());
+            var reply = await ping.SendPingAsync(target, TimeSpan.FromSeconds(2));
+            return new PingResultDto(reply.Status == IPStatus.Success, reply.RoundtripTime, target);
         }
         catch
         {
-            return new PingResultDto(false, 0, host.Trim());
+            return new PingResultDto(false, 0, target);
         }
     }
 }

@@ -42,6 +42,7 @@ public sealed record SelfTestResultDto(SelfTestId Id, SelfTestState State, strin
 
 public sealed record SelfTestRequest(SelfTestId Id);
 
-public sealed record PingRequest(string Host);
+/// <summary>Ping a host. With <c>Port</c> set, measures a TCP connect (handshake latency); without it, ICMP.</summary>
+public sealed record PingRequest(string Host, int? Port = null);
 
 public sealed record PingResultDto(bool Ok, double Ms, string Host);

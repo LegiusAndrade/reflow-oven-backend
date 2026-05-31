@@ -57,6 +57,20 @@ public sealed class SimulatedSystemController(IClock clock, IOptions<SystemOptio
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<NetworkInterfaceInfo>> ListInterfacesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<NetworkInterfaceInfo>>(
+        [
+            new(_o.EthernetInterface, InterfaceKind.Ethernet, !_wifi, _wifi ? "" : "192.168.0.42"),
+            new(_o.WifiInterface, InterfaceKind.WiFi, _wifi, _wifi ? "192.168.0.42" : ""),
+        ]);
+
+    public Task SetPriorityInterfaceAsync(string interfaceName, CancellationToken ct = default)
+    {
+        _wifi = string.Equals(interfaceName, _o.WifiInterface, StringComparison.OrdinalIgnoreCase);
+        logger.LogInformation("[sim] Interface prioritária: {Iface}.", interfaceName);
+        return Task.CompletedTask;
+    }
+
     public Task<TimeStatus> GetTimeStatusAsync(CancellationToken ct = default) =>
         Task.FromResult(new TimeStatus(clock.UtcNow, "America/Sao_Paulo", _ntp, _ntp));
 
