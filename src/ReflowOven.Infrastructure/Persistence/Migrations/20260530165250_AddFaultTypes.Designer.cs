@@ -13,8 +13,8 @@ using ReflowOven.Infrastructure.Persistence;
 namespace ReflowOven.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ReflowDbContext))]
-    [Migration("20260530130347_Initial")]
-    partial class Initial
+    [Migration("20260530165250_AddFaultTypes")]
+    partial class AddFaultTypes
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -549,7 +549,10 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", t =>
+                        {
+                            t.HasCheckConstraint("CK_Users_Name", "\"Name\" ~ '^[[:alnum:].]+$'");
+                        });
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.UserActivityStat", b =>
