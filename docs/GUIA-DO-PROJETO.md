@@ -32,7 +32,7 @@ Quando você rodou `dotnet run`, no log apareceu:
 
 - `Applying migration 'Initial'` → ele **criou as tabelas** no banco.
 - Vários `INSERT INTO ...` → o **seed** populou dados iniciais (50 programas, 8 falhas, etc.).
-- `Now listening on: http://localhost:5248` → a API **está no ar**. Abra `http://localhost:5248/swagger`.
+- `Now listening on: http://localhost:5248` → a API **está no ar**. Abra `http://localhost:5248/scalar`.
 - A linha `fail ... __EFMigrationsHistory` é **normal** num banco vazio (o EF tenta ler a tabela de
   controle de migrations, ela ainda não existe, então ele cria). Não é um erro.
 
@@ -135,6 +135,8 @@ services:
 | `Enums/Enums.cs` | Todos os enums. **Importante:** os literais em pt-BR (`Concluído`, `Crítico`, `Parábola positiva`…) são **parte do contrato** com o frontend; o atributo `[JsonStringEnumMemberName]` fixa o texto exato. |
 | `Common/DomainConstants.cs` | Todos os **limites** (tamanho de nome, faixas de temperatura…). É o espelho do `limits.ts` do frontend. |
 | `Hardware/IPowerBoard.cs` + `HardwareTypes.cs` | A **interface** da placa (ler sensores, iniciar/parar, calibrar…) e os tipos de dados dela. Não diz **como** — só o "contrato". |
+| `Platform/ISystemController.cs` | A **interface do sistema operacional** do OrangePi (métricas CPU/mem/disco, rede/Wi-Fi/IP, relógio/NTP, atualização OTA, reboot/shutdown, ping do servidor central). É a "placa" do SO — só o contrato. |
+| `Entities/Notification.cs` | Uma **notificação do feed** (o sininho da TopBar / tela Notificações): `info`/`error`/`update`. Diferente das preferências fixas de `NotificationSetting`. |
 | `Abstractions/IClock.cs` | Abstração do relógio (facilita testes). |
 | `Abstractions/ITelemetrySink.cs` | Para onde a telemetria é "empurrada" (implementado na API com SignalR). |
 | `GlobalUsings.cs` | `using` globais (evita repetir imports em todo arquivo). |
@@ -155,8 +157,10 @@ services:
 | `Services/CalibrationService.cs` | Ler/gravar calibração e o **ajuste (fit)** do assistente de saída. |
 | `Services/ReportService.cs` | Relatórios (Execuções/Erros/Alterações/Log) — só leitura, paginado. |
 | `Services/DiagnosticsService.cs` | Estatísticas/rankings, leitura dos sensores, autotestes, ping de rede. |
-| `Services/MaintenanceService.cs` | Tamanho do banco, **limpeza** por categoria e **reset de fábrica**. |
+| `Services/MaintenanceService.cs` | Tamanho **real** do banco (`pg_database_size`), **limpeza** por categoria e **reset de fábrica**. |
 | `Services/DeviceService.cs` | Monta a tela de Informação (disco ao vivo + dados das placas). |
+| `Services/SystemService.cs` | Embrulha o `ISystemController` (métricas/rede/Wi-Fi/relógio/atualização/energia) + o tamanho real do banco. É o que o `/api/system/*` usa. |
+| `Services/NotificationService.cs` | O **feed de notificações**: listar, contador de não-lidas, marcar lida/todas, e `RaiseAsync` (usado pela execução e pelo monitor de sistema). |
 | `Services/AuditService.cs` | Grava o histórico de alterações e incrementa os contadores por usuário. |
 | `Common/ProfileBuilder.cs` | Porta fiel do `toProfile`/`tempAt` do frontend (transforma segmentos na curva e interpola na execução). |
 | `Common/Defaults.cs` | **Fonte única** dos dados de seed (50 programas, 8 falhas, 11 notificações, configs padrão). |
@@ -177,6 +181,10 @@ services:
 | `Hardware/SimulatedPowerBoard.cs` | A **placa simulada** (padrão): interpola o perfil e gera leituras plausíveis, sem hardware. |
 | `Hardware/Rs422PowerBoard.cs` | A placa **real** (esqueleto): aqui entraria o protocolo RS422 do STM32. |
 | `Hardware/HardwareOptions.cs` | Escolhe Simulated/Rs422 via `appsettings` (`Hardware:Mode`). |
+| `Platform/SimulatedSystemController.cs` | O **SO simulado** (padrão): dados plausíveis e mutações no-op, pra rodar a API num PC sem o OrangePi. |
+| `Platform/LinuxSystemController.cs` | O **SO real**: chama `nmcli`/`timedatectl`/`systemctl` e lê `/proc`+`/sys`. Escolhido com `System:Mode=Linux`. Comandos que alteram o sistema exigem **privilégios** (sudoers/polkit). |
+| `Platform/ProcessRunner.cs` + `SystemOptions.cs` | Roda comandos do SO (sem shell, captura stdout/stderr) e a config da seção `System`. |
+| `BackgroundServices/SystemMonitorService.cs` | Em segundo plano: vigia o **servidor central** e a **atualização (OTA)**; quando muda, gera uma notificação no feed. Inofensivo no modo simulado. |
 | `Auth/BcryptPasswordHasher.cs` | Faz o hash/verificação de senha com BCrypt. |
 | `Auth/JwtTokenService.cs` + `JwtOptions.cs` | Gera o token JWT (claims: id, nome, papel, calibração). |
 | `Auth/TechnicianCredentials.cs` | Valida o login técnico oculto contra a config. |
@@ -190,8 +198,8 @@ services:
 
 | Arquivo | O que faz / por quê |
 | --- | --- |
-| `Program.cs` | O **ponto de entrada**: liga tudo (banco, DI, JWT+policies, SignalR, CORS, Swagger), **aplica a migration + seed** no start e mapeia controllers/hubs. |
-| `Controllers/*.cs` | Um controller por área: `Auth`, `Users`, `Programs`, `Runs`, `Report*` (Execuções/Erros/Alterações/Log/FaultTypes), `Settings`, `Calibration`, `Diagnostics`, `Maintenance`, `Device`. Cada método é um endpoint HTTP. |
+| `Program.cs` | O **ponto de entrada**: liga tudo (banco, DI, JWT+policies, SignalR, CORS, **Serilog**, **Scalar/OpenAPI**), **aplica a migration + seed** no start e mapeia controllers/hubs. |
+| `Controllers/*.cs` | Um controller por área: `Auth`, `Users`, `Programs`, `Runs`, `Report*` (Execuções/Erros/Alterações/Log/FaultTypes), `Settings`, `Calibration`, `Diagnostics`, `Maintenance`, `Device`, `System` (`/api/system/*` — leituras autenticadas, **mutações `AdminOnly`**: rede/Wi-Fi/relógio/NTP/atualização/reboot/shutdown) e `Notifications` (`/api/notifications/*` — feed do sininho). Cada método é um endpoint HTTP. |
 | `Realtime/RunTelemetryHub.cs` | Hub SignalR `/hubs/telemetry`: o cliente entra no grupo de uma execução e recebe os pontos ao vivo. |
 | `Realtime/DiagnosticsHub.cs` | Hub `/hubs/diagnostics`: leituras de sensor a 1 Hz na tela de Diagnóstico. |
 | `Realtime/SignalRTelemetrySink.cs` | Implementa `ITelemetrySink` enviando os dados pelos hubs. |
@@ -249,13 +257,20 @@ services:
 2. Vá na aba **Run and Debug** (ícone de "play" com inseto), escolha **"Debug API (.NET 10)"** e tecle **F5**.
    - Isso roda a tarefa `build`, sobe a API com o debugger anexado e abre o navegador na URL que aparecer.
 3. Coloque um **breakpoint** clicando na margem esquerda de uma linha (ex.: dentro de
-   `AuthController.Login` ou `ProgramService.ListAsync`). Faça a chamada pelo **Swagger**
-   (`http://localhost:5248/swagger`) e o VSCode vai **parar** na linha — você inspeciona variáveis,
+   `AuthController.Login` ou `ProgramService.ListAsync`). Faça a chamada pelo **Scalar**
+   (`http://localhost:5248/scalar`) e o VSCode vai **parar** na linha — você inspeciona variáveis,
    usa F10 (passo a passo) / F11 (entra no método) / F5 (continua).
-4. Para testar endpoints protegidos no Swagger: faça `POST /api/auth/login` (usuário `lucas.silva`,
-   senha `reflow1234`), copie o `token`, clique em **Authorize** (cadeado) e cole. Agora as chamadas vão autenticadas.
+4. Para testar endpoints protegidos no Scalar: faça `POST /api/auth/login` (usuário `lucas.silva`,
+   senha `reflow1234`), copie o `token`, abra o painel **Authentication** (Bearer) e cole. Agora as chamadas vão autenticadas.
 5. Para depurar os **testes**: abra um arquivo de teste e use os ícones "Run/Debug Test" acima de cada
    `[Fact]` (com o C# Dev Kit), ou rode a tarefa **test**.
+
+> **O debugger "parou" numa exceção de validação (ex.: `ValidationAppException`, `ConflictException`)?**
+> Isso é **normal** e **não é um bug**: são exceções de controle de fluxo, capturadas pelo
+> `ExceptionMiddleware`, que devolve um `400`/`409` limpo (ProblemDetails) ao front e registra um
+> `WRN` no console. O VSCode só está te avisando da exceção no momento em que ela é lançada
+> ("first-chance"). Para não parar mais nelas: na aba **Run and Debug**, seção **BREAKPOINTS**,
+> **desmarque** "All Exceptions" / "User-Unhandled Exceptions". Aperte F5 que segue normal.
 
 > Dica: a configuração **"Attach to process (.NET)"** serve para anexar o debugger a uma API que já
 > está rodando (escolha o processo `ReflowOven.Api`).

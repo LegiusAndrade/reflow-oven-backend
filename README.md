@@ -42,7 +42,9 @@ dotnet run --project src/ReflowOven.Api      # aplica migrations, faz o seed e s
 ```
 
 A API sobe em `https://localhost:5001` / `http://localhost:5000` (veja `Properties/launchSettings.json`).
-A documentação **Swagger** fica em `/swagger`. Health-check em `/health`.
+A referência de API interativa (**Scalar**) fica em `/scalar` (doc OpenAPI em `/openapi/v1.json`).
+Health-check em `/health`. Todos os eventos (login/logout, alterações, execuções, erros) e cada
+requisição HTTP são logados no **console** via **Serilog**.
 
 **Login de desenvolvimento:** qualquer usuário do seed (ex.: `lucas.silva`, admin) com a senha
 `reflow1234`, ou o login técnico oculto `calibracao` / `calibra`.
@@ -99,10 +101,11 @@ tests/
 
 REST sob `/api` (autenticado por padrão; `AdminOnly` para escritas; `CalibrationOnly` para a calibração):
 
-- `auth` (login/me/forgot-password) · `programs` (+ `favorite`) · `runs` (start/stop/status)
+- `auth` (login/me/forgot-password/change-password) · `programs` (+ `favorite`) · `runs` (start/stop/status)
 - `executions` · `errors` · `changes` · `system-log` · `fault-types` (Relatórios)
 - `settings` · `calibration` (+ `wizard`) · `network/ping`
 - `diagnostics` (overview/readings/self-test) · `maintenance` (overview/cleanup/factory-reset) · `device`
+- `system` (status/metrics/network/wifi/time/ntp/update/connectivity/reboot/shutdown — OS do OrangePi) · `notifications` (feed do sininho)
 
 Tempo real (JWT via `?access_token=`):
 

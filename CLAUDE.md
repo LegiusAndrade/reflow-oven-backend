@@ -24,7 +24,7 @@ export DOTNET_ROOT="$HOME/.dotnet"; export PATH="$HOME/.dotnet:$HOME/.dotnet/too
 ```bash
 docker compose up -d                              # start PostgreSQL (required to run/migrate-apply)
 dotnet build ReflowOven.slnx                      # build everything (note: .slnx, the new XML solution format)
-dotnet run --project src/ReflowOven.Api           # run API (migrates + seeds on startup); Swagger at /swagger
+dotnet run --project src/ReflowOven.Api           # run API (migrates + seeds on startup); Scalar API ref at /scalar
 dotnet test                                       # run all tests
 dotnet test --filter FullyQualifiedName~ProfileBuilderTests   # run one test class
 
@@ -44,16 +44,21 @@ hidden technician `calibracao` / `calibra`. See `Application/Common/Defaults.cs`
 Clean Architecture, four projects + tests; dependencies point inward (Api → Infrastructure → Application → Domain):
 
 - **`ReflowOven.Domain`** — entities, enums, `DomainConstants` (the C# mirror of the frontend's
-  `limits.ts`), and the hardware/clock/telemetry abstractions (`IPowerBoard`, `IClock`, `ITelemetrySink`).
+  `limits.ts`), the hardware/clock/telemetry abstractions (`IPowerBoard`, `IClock`, `ITelemetrySink`), and
+  the OS/platform abstraction (`Platform/ISystemController` — network/clock/update/power on the Pi).
   No external dependencies.
 - **`ReflowOven.Application`** — `IAppDbContext`, DTOs (the JSON contract), services
-  (`Auth/User/Program/Settings/Calibration/Report/Diagnostics/Maintenance/Device/Audit`), `ProfileBuilder`
-  (server-side port of the editor's `toProfile` + run interpolation), and `Defaults` (seed/factory data).
+  (`Auth/User/Program/Settings/Calibration/Report/Diagnostics/Maintenance/Device/Audit/System/Notification`),
+  `ProfileBuilder` (server-side port of the editor's `toProfile` + run interpolation), and `Defaults`
+  (seed/factory data).
 - **`ReflowOven.Infrastructure`** — `ReflowDbContext` (+ all mapping inline in `OnModelCreating`),
   EF migrations, `DbSeeder`, the power board (`SimulatedPowerBoard` default / `Rs422PowerBoard` stub),
-  `RunManager`, the `RunControlLoopService` background loop, JWT/BCrypt/clock/email implementations.
+  the OS controller (`Platform/SimulatedSystemController` default / `LinuxSystemController`),
+  `RunManager`, the `RunControlLoopService` + `SystemMonitorService` background loops,
+  JWT/BCrypt/clock/email implementations.
 - **`ReflowOven.Api`** — `Program.cs` wiring, controllers, the two SignalR hubs + `SignalRTelemetrySink`,
-  `CurrentUser` (reads JWT claims), and the ProblemDetails exception middleware.
+  `CurrentUser` (reads JWT claims), the ProblemDetails exception middleware, **Serilog** (console) and the
+  **Scalar** API reference (`/scalar`, OpenAPI doc at `/openapi/v1.json`) — both dev-only, `AllowAnonymous`.
 
 ### Things that span multiple files
 
@@ -64,16 +69,44 @@ Clean Architecture, four projects + tests; dependencies point inward (Api → In
   `DiagnosticsHub` (`/hubs/diagnostics`). On a terminal state the run is persisted as an `ExecutionReport`.
   The board is fully abstracted — `SimulatedPowerBoard` interpolates the profile so telemetry is coherent
   with no hardware; swap to `Rs422PowerBoard` via `Hardware:Mode=Rs422`.
+- **OS control + notification feed (OrangePi).** `ISystemController` (Domain `Platform`) is the device
+  counterpart of `IPowerBoard`: OS metrics (CPU/mem/disk/uptime/temp), network/Wi-Fi/IP, clock/NTP,
+  software update (OTA) and reboot/shutdown, plus central-server reachability. `SimulatedSystemController`
+  (default) returns plausible data and no-ops mutations so the API runs on a dev box; `LinuxSystemController`
+  shells out to `nmcli`/`timedatectl`/`systemctl` + `/proc`/`/sys` (selected by **`System:Mode=Linux`**).
+  Mutating OS commands need privileges — run under a user with the matching **sudoers/polkit** rules.
+  `SystemService` wraps it (and adds the real DB size); `SystemController` exposes `/api/system/*`
+  (reads authenticated, every mutation `AdminOnly`). The **notification feed** (`Notification` entity →
+  `/api/notifications`, the TopBar bell + Notificações screen) is device-wide: `RunManager` raises one on
+  each run finalize, `SystemMonitorService` (a `BackgroundService`) raises one when the central server goes
+  up/down or an update appears. Feed `kind` is `info`/`error`/`update`; `at` is ISO 8601 (the frontend maps
+  it to the epoch-ms its local `AppNotification` uses, like it already does for `DeviceInfoDto`).
+- **Network changes apply to the OS.** `SettingsService.UpdateAsync` persists the Rede form to the DB **and**
+  best-effort calls `ISystemController.ApplyNetworkConfigAsync` when a network field changed (a failed apply
+  is logged, never fails the save). Note the OS-level config record is `Platform.OsNetworkConfig` — named to
+  avoid colliding with the persisted `Entities.NetworkConfig` (both namespaces are globally imported).
 - **Enums are pt-BR text on the wire AND in the DB.** Enum members carry `[JsonStringEnumMemberName(...)]`
   with the exact accented literal the frontend expects (`Concluído`, `Crítico`, `Parábola positiva`,
-  `Contínuo`, `Atenção`, …). A global `JsonStringEnumConverter` handles JSON; `PtBrEnumConverter<T>`
-  (applied to every non-JSON enum column in `OnModelCreating`) reads the *same* attribute so DB text and
-  JSON stay identical. **Never change these literals** without changing the frontend — they are the contract.
+  `Contínuo`, `Atenção`, network link `Cabo`/`WiFi`/`Nenhum`, feed `info`/`error`/`update`, …). A global
+  `JsonStringEnumConverter` handles JSON; `PtBrEnumConverter<T>` (applied to every non-JSON enum column in
+  `OnModelCreating`) reads the *same* attribute so DB text and JSON stay identical. **Never change these
+  literals** without changing the frontend — they are the contract.
 - **Limits are a single source of truth.** `DomainConstants` mirrors `../reflow-oven-front/src/lib/limits.ts`
   exactly. Enforce caps via the validators/services; keep the two files in lock-step.
 - **Soft-delete & audit.** Programs are soft-deleted (`IsDeleted` + a global query filter hides them and the
   seeded catalog); everything else is hard-deleted. `AuditService` writes a `ChangeLogEntry` and bumps the
   per-user activity counters on every program/config mutation.
+- **Logging is console-only (Serilog).** `Program.cs` wires Serilog (`UseSerilog` + `UseSerilogRequestLogging`
+  → one line per HTTP request). Operational events are logged at the service seams: `AuthService`
+  (login OK/falha/logout), `UserService` (CRUD), `AuditService` (program + config changes — covers
+  `ProgramService`/`SettingsService`), `RunManager` (run start/finalize/board errors). `ExceptionMiddleware`
+  logs `AppException` as **Warning** (it is handled → 400/409, never a crash) and unhandled errors as Error.
+  EF Core SQL + detailed errors are on in Development only. This is **separate** from the `SystemLog` DB
+  table (read by the *Log do Sistema* screen, currently demo-seeded).
+- **Server-side paging caps.** Every list query clamps `pageSize` so a client can't pull an unbounded set:
+  reports/logs ≤ `DomainConstants.ReportPageSizeMax` (200), programs ≤ `ProgramPageSizeMax` (100),
+  notifications ≤ `NotificationFeedMax` (200). `MaintenanceService` reports the **real** DB size via
+  `IAppDbContext.GetDatabaseSizeBytesAsync` (`pg_database_size`); only the per-category split is an estimate.
 - **Auth.** JWT bearer, authenticated-by-default (fallback policy). `AdminOnly` guards writes; `CalibrationOnly`
   (the `calibration` claim) guards the hidden Calibração endpoints. The technician login is config, not a
   `User` row. SignalR takes the JWT from the `access_token` query string.
