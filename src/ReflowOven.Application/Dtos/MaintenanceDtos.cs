@@ -6,6 +6,7 @@ public sealed record DatabaseSizeDto(long TotalBytes, IReadOnlyList<CategorySize
 
 public sealed record MaintenanceOverviewDto(
     DatabaseSizeDto Database,
+    double CpuLoadPercent,
     double DiskFreeGB,
     double DiskTotalGB,
     string Os,

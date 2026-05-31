@@ -199,8 +199,11 @@ interpolação (`TempAt`), sem inflar o armazenamento da execução. **Sem migra
 front espelha `100` em `limits.ts` e mostra `x/100` + tempo total.
 > Já OK no backend (o front só consome): histórico de edições por programa já limitado a
 > `ChangeRetentionPerProgramMax = 10`, e `GET /api/changes` aceita `programId` (dá pra listar as últimas 10
-> edições e montar o gráfico multi-curva). Carga de CPU já vem em `SystemMetricsDto.CpuLoadPercent`
-> (média dos núcleos) — falta só o front mostrar.
+> edições e montar o gráfico multi-curva). **Carga de CPU (%):** agora é a **utilização real** (delta de
+> `/proc/stat`, `(total−idle)/total`, já a média de todos os núcleos) — não mais o `/proc/loadavg`. Exposta em
+> `SystemMetricsDto.CpuLoadPercent` (`/api/system/metrics` e `/api/system/status`) **e** em
+> `MaintenanceOverviewDto.CpuLoadPercent` (`/api/maintenance/overview`), ao lado do `DiskFreeGB` — falta só o
+> front mostrar uma `InfoRow` "Carga da CPU" junto do "Espaço livre no HD".
 
 ---
 

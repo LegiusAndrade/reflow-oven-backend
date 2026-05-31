@@ -19,6 +19,9 @@ public sealed class LinuxSystemController(
 {
     private readonly SystemOptions _o = options.Value;
 
+    /// <summary>Sampling window for the /proc/stat CPU-utilization delta (ms).</summary>
+    private const int CpuSampleMs = 200;
+
     public async Task<SystemMetrics> GetMetricsAsync(CancellationToken ct = default)
     {
         var (memUsed, memTotal) = ReadMemoryMB();
@@ -28,12 +31,30 @@ public sealed class LinuxSystemController(
             Os: ReadOsPrettyName(),
             Kernel: (await ProcessRunner.RunAsync("uname", "-r", ct)).StdOut is { Length: > 0 } k ? k : Environment.OSVersion.VersionString,
             UptimeSeconds: ReadUptimeSeconds(),
-            CpuLoadPercent: ReadCpuLoadPercent(),
+            CpuLoadPercent: await GetCpuLoadPercentAsync(ct),
             CpuTempC: ReadCpuTempC(),
             MemoryUsedMB: memUsed,
             MemoryTotalMB: memTotal,
             DiskFreeGB: Math.Round(root.AvailableFreeSpace / 1e9, 1),
             DiskTotalGB: Math.Round(root.TotalSize / 1e9, 1));
+    }
+
+    public async Task<double> GetCpuLoadPercentAsync(CancellationToken ct = default)
+    {
+        // True utilization = busy jiffies / total jiffies over a short window, read from the aggregate
+        // "cpu" line of /proc/stat (already summed across every core ⇒ the per-core average). This is the
+        // instantaneous "% busy" the dashboard wants — unlike /proc/loadavg's 1-minute run-queue average.
+        try
+        {
+            var (idle1, total1) = ReadCpuJiffies();
+            await Task.Delay(CpuSampleMs, ct);
+            var (idle2, total2) = ReadCpuJiffies();
+            return CpuBusyPercent(idle2 - idle1, total2 - total1);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return 0;
+        }
     }
 
     // --- network ------------------------------------------------------------------------------
@@ -289,15 +310,23 @@ public sealed class LinuxSystemController(
         catch { return 0; }
     }
 
-    private static double ReadCpuLoadPercent()
+    /// <summary>CPU "% busy" from two /proc/stat snapshots: <c>(total − idle) / total</c> over the window,
+    /// clamped to 0–100 and rounded. Pure (no I/O) so it is unit-testable; returns 0 for a non-positive
+    /// window.</summary>
+    public static double CpuBusyPercent(long idleDelta, long totalDelta) =>
+        totalDelta <= 0 ? 0 : Math.Round(Math.Clamp(100.0 * (totalDelta - idleDelta) / totalDelta, 0, 100), 1);
+
+    // Aggregate "cpu" line: "cpu user nice system idle iowait irq softirq steal guest guest_nice".
+    // idle-time = idle + iowait; total = sum of every numeric column (summed over all cores by the kernel).
+    private static (long idle, long total) ReadCpuJiffies()
     {
-        try
-        {
-            var load1 = double.Parse(File.ReadAllText("/proc/loadavg").Split(' ')[0], CultureInfo.InvariantCulture);
-            var cores = Math.Max(1, Environment.ProcessorCount);
-            return Math.Round(Math.Min(100, load1 / cores * 100), 1);
-        }
-        catch { return 0; }
+        var line = File.ReadLines("/proc/stat").First(l => l.StartsWith("cpu ", StringComparison.Ordinal));
+        var cols = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        long total = 0;
+        for (var i = 1; i < cols.Length; i++) total += long.Parse(cols[i], CultureInfo.InvariantCulture);
+        var idle = long.Parse(cols[4], CultureInfo.InvariantCulture);
+        if (cols.Length > 5) idle += long.Parse(cols[5], CultureInfo.InvariantCulture); // + iowait
+        return (idle, total);
     }
 
     private static double? ReadCpuTempC()

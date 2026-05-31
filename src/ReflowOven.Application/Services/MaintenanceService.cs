@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
-public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock)
+public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system)
 {
     /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
     /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
@@ -36,7 +36,8 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 
         var (freeGB, totalGB) = DiskSpace();
-        return new MaintenanceOverviewDto(db_, freeGB, totalGB, RuntimeInformation.OSDescription, RuntimeInformation.RuntimeIdentifier);
+        var cpu = await system.GetCpuLoadPercentAsync(ct);
+        return new MaintenanceOverviewDto(db_, cpu, freeGB, totalGB, RuntimeInformation.OSDescription, RuntimeInformation.RuntimeIdentifier);
     }
 
     public async Task<CleanupResultDto> CleanupAsync(IReadOnlyList<CleanupId> categories, CancellationToken ct = default)

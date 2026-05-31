@@ -22,12 +22,17 @@ public sealed class SimulatedSystemController(IClock clock, IOptions<SystemOptio
             Os: "Armbian (simulado)",
             Kernel: "6.6.0-edge-rockchip64",
             UptimeSeconds: 3 * 3600 + Random.Shared.Next(0, 3600),
-            CpuLoadPercent: Math.Round(8 + Random.Shared.NextDouble() * 20, 1),
+            CpuLoadPercent: SimCpuLoad(),
             CpuTempC: Math.Round(42 + Random.Shared.NextDouble() * 8, 1),
             MemoryUsedMB: 420 + Random.Shared.Next(0, 120),
             MemoryTotalMB: 2048,
             DiskFreeGB: Math.Round(22 + Random.Shared.NextDouble(), 1),
             DiskTotalGB: 32));
+
+    public Task<double> GetCpuLoadPercentAsync(CancellationToken ct = default) => Task.FromResult(SimCpuLoad());
+
+    /// <summary>Plausible idle-ish oven CPU load (8–28%).</summary>
+    private static double SimCpuLoad() => Math.Round(8 + Random.Shared.NextDouble() * 20, 1);
 
     public Task<NetworkStatus> GetNetworkStatusAsync(CancellationToken ct = default) =>
         Task.FromResult(_wifi

@@ -75,6 +75,11 @@ public interface ISystemController
 {
     Task<SystemMetrics> GetMetricsAsync(CancellationToken ct = default);
 
+    /// <summary>Instantaneous CPU utilization (%), averaged across all cores. On the Pi this is a short
+    /// <c>/proc/stat</c> delta; the simulator returns a plausible value. Lighter than
+    /// <see cref="GetMetricsAsync"/> when only the CPU figure is needed (e.g. the Manutenção overview).</summary>
+    Task<double> GetCpuLoadPercentAsync(CancellationToken ct = default);
+
     Task<NetworkStatus> GetNetworkStatusAsync(CancellationToken ct = default);
     Task ApplyNetworkConfigAsync(OsNetworkConfig config, CancellationToken ct = default);
     Task<IReadOnlyList<WifiNetwork>> ScanWifiAsync(CancellationToken ct = default);
