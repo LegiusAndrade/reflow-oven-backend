@@ -38,6 +38,21 @@ public sealed class RunControlLoopService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Falha no loop de controle da execução.");
+
+                // Don't leave a half-ticked run stuck as "Running" forever (which would make every
+                // future start fail with "Já existe uma execução em andamento"). Abort it cleanly.
+                if (runManager.GetStatus() is { Status: RunStatus.Running })
+                {
+                    try
+                    {
+                        await runManager.StopAsync(stoppingToken);
+                        logger.LogWarning("Execução ativa abortada após falha no loop de controle.");
+                    }
+                    catch (Exception stopEx)
+                    {
+                        logger.LogError(stopEx, "Não foi possível abortar a execução após a falha no loop.");
+                    }
+                }
             }
         }
     }

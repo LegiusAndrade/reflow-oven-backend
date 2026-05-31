@@ -11,11 +11,15 @@ public sealed class ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionM
         }
         catch (AppException ex)
         {
+            // Expected business errors (validation 400, conflict 409, …). They ARE handled here —
+            // the client gets a clean ProblemDetails. Logged as a Warning, never an unhandled crash.
+            logger.LogWarning("Requisição rejeitada ({Status}) em {Method} {Path}: {Detail}",
+                ex.StatusCode, context.Request.Method, context.Request.Path, ex.Message);
             await WriteProblemAsync(context, ex.StatusCode, ex.Message);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Erro não tratado.");
+            logger.LogError(ex, "Erro não tratado em {Method} {Path}.", context.Request.Method, context.Request.Path);
             await WriteProblemAsync(context, StatusCodes.Status500InternalServerError, "Erro interno do servidor.");
         }
     }

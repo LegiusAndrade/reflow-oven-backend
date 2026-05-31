@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using ReflowOven.Api.Auth;
@@ -12,8 +13,29 @@ using ReflowOven.Application;
 using ReflowOven.Infrastructure;
 using ReflowOven.Infrastructure.Auth;
 using ReflowOven.Infrastructure.Persistence;
+using Scalar.AspNetCore;
+using Serilog;
+using Serilog.Events;
+
+// Bootstrap logger: captures anything thrown during startup (config, DI, migrations) on the console.
+// It is replaced by the fully-configured logger once the host is built (see UseSerilog below).
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
+
+try
+{
 
 var builder = WebApplication.CreateBuilder(args);
+
+// --- Logging (Serilog → console; everything: requests, login, CRUD, run, DB errors) -----
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"));
 
 // --- Application + Infrastructure -------------------------------------------------------
 builder.Services.AddApplication();
@@ -76,23 +98,28 @@ builder.Services.AddCors(o => o.AddPolicy(corsPolicy, p =>
 
 builder.Services.AddHealthChecks();
 
-// --- OpenAPI / Swagger (with JWT) -------------------------------------------------------
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
+// --- OpenAPI document (served for the Scalar UI; declares the JWT bearer scheme) ---------
+builder.Services.AddOpenApi(options =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Reflow Oven API", Version = "v1" });
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    options.AddDocumentTransformer((document, context, _) =>
     {
-        Name = "Authorization",
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = ParameterLocation.Header,
-        Description = "JWT Bearer — informe apenas o token.",
-    });
-    c.AddSecurityRequirement(doc => new OpenApiSecurityRequirement
-    {
-        [new OpenApiSecuritySchemeReference("Bearer", doc)] = new List<string>(),
+        document.Info.Title = "Reflow Oven API";
+        document.Info.Version = "v1";
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "JWT Bearer — informe apenas o token.",
+        };
+        document.Security =
+        [
+            new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference("Bearer", document)] = [] },
+        ];
+        return Task.CompletedTask;
     });
 });
 
@@ -117,10 +144,18 @@ if (args.Contains("seed-only"))
 // --- Pipeline ---------------------------------------------------------------------------
 app.UseMiddleware<ExceptionMiddleware>();
 
+// One concise line per HTTP request (method, path, status, elapsed ms) — and the SignalR handshakes.
+app.UseSerilogRequestLogging();
+
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    // OpenAPI doc at /openapi/v1.json, served through the Scalar reference UI at /scalar.
+    // Both are endpoints, so they need AllowAnonymous to escape the authenticated-by-default policy.
+    app.MapOpenApi().AllowAnonymous();
+    app.MapScalarApiReference(options => options
+        .WithTitle("Reflow Oven API")
+        .WithTheme(ScalarTheme.Purple))
+        .AllowAnonymous();
 }
 
 app.UseCors(corsPolicy);
@@ -133,3 +168,13 @@ app.MapHub<DiagnosticsHub>("/hubs/diagnostics");
 app.MapHealthChecks("/health").AllowAnonymous();
 
 app.Run();
+
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "A API encerrou inesperadamente durante a inicialização.");
+}
+finally
+{
+    Log.CloseAndFlush();
+}

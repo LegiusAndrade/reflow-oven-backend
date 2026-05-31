@@ -4,7 +4,7 @@ namespace ReflowOven.Application.Services;
 /// Emits ChangeLogEntry audit rows and bumps per-user activity counters. Methods only stage the
 /// changes on the context; the calling service owns the SaveChanges so the whole mutation is one unit.
 /// </summary>
-public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser current)
+public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser current, ILogger<AuditService> logger)
 {
     /// <summary>Increment the current user's counter for the given pt-BR activity label.</summary>
     public async Task BumpActivityAsync(string label, CancellationToken ct = default)
@@ -23,6 +23,7 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
 
     public void RecordProgramChange(ChangeAction action, ReflowProgram program, IReadOnlyList<ChangePointRow>? points = null)
     {
+        logger.LogInformation("Programa {Action}: '{Target}' por '{Actor}'.", action, program.Name, current.Name ?? "sistema");
         db.Changes.Add(new ChangeLogEntry
         {
             Id = Guid.NewGuid(),
@@ -39,6 +40,7 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
 
     public void RecordConfigChange(IReadOnlyList<string> bullets)
     {
+        logger.LogInformation("Configuração alterada por '{Actor}': {Changes}.", current.Name ?? "sistema", string.Join("; ", bullets));
         db.Changes.Add(new ChangeLogEntry
         {
             Id = Guid.NewGuid(),
