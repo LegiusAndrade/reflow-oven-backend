@@ -160,13 +160,17 @@ public enum ProfileRole
     [JsonStringEnumMemberName("measured")] Measured,
 }
 
-/// <summary>Role of a row in a program change-diff.</summary>
+/// <summary>Role of a row in a program change-diff. An edit emits a per-point diff: a point that changed
+/// appears twice (<c>changed-before</c> + <c>changed-after</c>, same index); a point present in only one
+/// side is <c>added</c>/<c>removed</c>; a point with the same value on both sides is <c>unchanged</c>
+/// (emitted once so the curve stays complete without being flagged as a change).</summary>
 public enum ChangePointRole
 {
     [JsonStringEnumMemberName("added")] Added,
     [JsonStringEnumMemberName("removed")] Removed,
     [JsonStringEnumMemberName("changed-before")] ChangedBefore,
     [JsonStringEnumMemberName("changed-after")] ChangedAfter,
+    [JsonStringEnumMemberName("unchanged")] Unchanged,
 }
 
 public enum BoardRole

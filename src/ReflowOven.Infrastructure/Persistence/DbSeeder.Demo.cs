@@ -246,13 +246,36 @@ public static partial class DbSeeder
                 Role = role,
             })];
 
-        // Editado carries an antes×depois diff (previous curve ~8 °C cooler) so the front can draw
-        // both curves; Criado/Removido carry the single added/removed curve.
+        // Editado shows a real per-point diff so the Alterações screen exercises every role: point 1
+        // unchanged, the middle points changed (previous ~8 °C cooler), the last removed, plus one
+        // appended (added). Criado/Removido carry the single added/removed curve.
+        List<ChangePointRow> EditDiff()
+        {
+            var diff = new List<ChangePointRow>();
+            for (var k = 0; k < curve.Count; k++)
+            {
+                var t = (int)Math.Round(curve[k].T);
+                var temp = (int)Math.Round(curve[k].Temp);
+                if (k == 0)
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Unchanged });
+                else if (k == curve.Count - 1)
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Removed });
+                else
+                {
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = Math.Max(0, temp - 8), TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedBefore });
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedAfter });
+                }
+            }
+            var lastT = curve.Count > 0 ? (int)Math.Round(curve[^1].T) : 0;
+            diff.Add(new ChangePointRow { Index = curve.Count + 1, Temp = 60, TimeSec = lastT + 30, Ramp = RampShape.Linear, Role = ChangePointRole.Added });
+            return diff;
+        }
+
         var points = action switch
         {
             ChangeAction.Criado => Rows(ChangePointRole.Added, 0),
             ChangeAction.Removido => Rows(ChangePointRole.Removed, 0),
-            _ => [.. Rows(ChangePointRole.ChangedBefore, -8), .. Rows(ChangePointRole.ChangedAfter, 0)],
+            _ => EditDiff(),
         };
 
         return new ChangeLogEntry

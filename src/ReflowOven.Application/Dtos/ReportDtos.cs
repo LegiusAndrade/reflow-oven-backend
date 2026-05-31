@@ -117,4 +117,5 @@ public sealed record ReportQuery(
     string? Status = null,
     string? Action = null,
     string? Severity = null,
-    string? Level = null);
+    string? Level = null,
+    string? ProgramId = null);

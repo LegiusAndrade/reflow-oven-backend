@@ -74,6 +74,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         };
         db.Programs.Add(program);
         audit.RecordProgramChange(ChangeAction.Criado, program, BuildPoints(program, ChangePointRole.Added));
+        await audit.PruneProgramChangesAsync(program.Id, ct);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[4], ct); // programas criados
         await db.SaveChangesAsync(ct);
         return Map(program, false);
@@ -86,9 +87,8 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
 
         var (name, description, segments, profile) = Validate(req);
 
-        // Snapshot the previous curve as `changed-before` before overwriting, so the change-log
-        // carries the full antes×depois diff (the new curve follows as `changed-after`). The front
-        // filters the rows by Role to draw both curves.
+        // Snapshot the previous curve, overwrite, then diff old-vs-new point by point so the change-log
+        // carries the full antes×depois with a precise per-point role (added/changed/removed/unchanged).
         var before = BuildPoints(program, ChangePointRole.ChangedBefore);
 
         program.Name = name;
@@ -96,7 +96,9 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         program.Segments = segments;
         program.Profile = profile;
 
-        audit.RecordProgramChange(ChangeAction.Editado, program, [.. before, .. BuildPoints(program, ChangePointRole.ChangedAfter)]);
+        var after = BuildPoints(program, ChangePointRole.ChangedAfter);
+        audit.RecordProgramChange(ChangeAction.Editado, program, BuildEditDiff(before, after));
+        await audit.PruneProgramChangesAsync(program.Id, ct);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[5], ct); // programas alterados
         await db.SaveChangesAsync(ct);
 
@@ -112,6 +114,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         program.IsDeleted = true;
         program.DeletedAt = clock.UtcNow;
         audit.RecordProgramChange(ChangeAction.Removido, program, BuildPoints(program, ChangePointRole.Removed));
+        await audit.PruneProgramChangesAsync(program.Id, ct);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[6], ct); // programas deletados
         await db.SaveChangesAsync(ct);
     }
@@ -167,7 +170,17 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         }
         else if (req.Profile is { Count: > 0 })
         {
-            profile = req.Profile.Select(p => new ProfilePoint { T = p.T, Temp = p.Temp }).ToList();
+            if (req.Profile.Count > DomainConstants.ProfileMaxPoints)
+                throw new ValidationAppException($"Máximo de {DomainConstants.ProfileMaxPoints} pontos no perfil.");
+
+            profile = req.Profile.Select(p =>
+            {
+                if (p.Temp < DomainConstants.PointTempMin || p.Temp > DomainConstants.PointTempMax)
+                    throw new ValidationAppException($"Temperatura fora da faixa {DomainConstants.PointTempMin}..{DomainConstants.PointTempMax} °C.");
+                if (p.T < 0)
+                    throw new ValidationAppException("Tempo do ponto não pode ser negativo.");
+                return new ProfilePoint { T = p.T, Temp = p.Temp };
+            }).ToList();
         }
         else
         {
@@ -202,6 +215,54 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
                     Ramp = RampShape.Linear,
                     Role = role,
                 });
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Diff the old and new curves point-by-point (by position/index) into one role-tagged list:
+    /// an unchanged point appears once (<see cref="ChangePointRole.Unchanged"/>); a changed point appears
+    /// twice — <see cref="ChangePointRole.ChangedBefore"/> + <see cref="ChangePointRole.ChangedAfter"/> at
+    /// the same index; a point only in the new curve is <see cref="ChangePointRole.Added"/>; one only in
+    /// the old curve is <see cref="ChangePointRole.Removed"/>. The front rebuilds the <i>before</i> curve
+    /// from removed+changed-before+unchanged and the <i>after</i> curve from added+changed-after+unchanged,
+    /// and labels each point from its role. Position-based: inserting a point mid-curve shifts the rest, so
+    /// the tail reads as changed — simple, predictable, and matches the index-keyed tables in the UI.
+    /// </summary>
+    private static List<ChangePointRow> BuildEditDiff(IReadOnlyList<ChangePointRow> before, IReadOnlyList<ChangePointRow> after)
+    {
+        var rows = new List<ChangePointRow>();
+        var max = Math.Max(before.Count, after.Count);
+        for (var i = 0; i < max; i++)
+        {
+            var b = i < before.Count ? before[i] : null;
+            var a = i < after.Count ? after[i] : null;
+
+            if (b is not null && a is not null)
+            {
+                if (b.Temp == a.Temp && b.TimeSec == a.TimeSec && b.Ramp == a.Ramp)
+                {
+                    a.Role = ChangePointRole.Unchanged;
+                    rows.Add(a);
+                }
+                else
+                {
+                    b.Role = ChangePointRole.ChangedBefore;
+                    a.Role = ChangePointRole.ChangedAfter;
+                    rows.Add(b);
+                    rows.Add(a);
+                }
+            }
+            else if (a is not null)
+            {
+                a.Role = ChangePointRole.Added;
+                rows.Add(a);
+            }
+            else
+            {
+                b!.Role = ChangePointRole.Removed;
+                rows.Add(b);
+            }
         }
         return rows;
     }

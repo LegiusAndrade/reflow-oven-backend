@@ -85,6 +85,7 @@ public sealed class ReportService(IAppDbContext db)
         if (q.From is not null) query = query.Where(c => c.At >= q.From);
         if (ToExclusive(q) is { } toExc) query = query.Where(c => c.At < toExc);
         if (EnumWire.TryFromWire<ChangeAction>(q.Action, out var action)) query = query.Where(c => c.Action == action);
+        if (!string.IsNullOrWhiteSpace(q.ProgramId)) query = query.Where(c => c.ProgramId == q.ProgramId);
 
         var total = await query.CountAsync(ct);
         var (page, size) = Paging(q);

@@ -10,8 +10,11 @@ public static class DomainConstants
     public const int ProgramNameMaxLength = 40;
     public const int ProgramDescriptionMaxLength = 120;
 
-    /// <summary>Max number of editable <b>segments</b> (the cap is on segments, not derived points).</summary>
-    public const int ProfileMaxPoints = 30;
+    /// <summary>Max editable points per program: the number of <b>segments</b> in the editor, OR the number of
+    /// points on the <b>direct profile import</b> path (<c>req.Profile</c>, a curve sent without segments).
+    /// Both are capped here. This is NOT a cap on the <i>derived</i> sampled curve, which can be larger (a
+    /// parabola segment expands into 12 sub-points) and is bounded only by the segment count.</summary>
+    public const int ProfileMaxPoints = 100;
 
     public const int PointTempMin = 0;
     public const int PointTempMax = 500;
@@ -79,6 +82,11 @@ public static class DomainConstants
 
     /// <summary>Free-disk threshold (%) below which the system monitor warns (bell + e-mail to admins).</summary>
     public const double DiskLowFreePercent = 10;
+
+    /// <summary>Max change-log rows kept per program (the most recent are kept; older ones are pruned on the
+    /// next program change). Bounds the Alterações table so repeatedly editing one program can't grow it
+    /// without bound. Config changes (no ProgramId) are not pruned by this.</summary>
+    public const int ChangeRetentionPerProgramMax = 10;
 
     // --- Diagnóstico (rankings) -----------------------------------------------------------
     public const int DiagRankMin = 3;
