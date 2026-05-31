@@ -165,7 +165,7 @@ using (var scope = app.Services.CreateScope())
         await DbSeeder.SeedDemoAsync(db, clock);
 
     // One-shot startup "auditoria" of the persisted/seeded data (users, programs, logs by type).
-    await ReflowOven.Api.StartupDiagnostics.LogAuditAsync(db, app.Logger);
+    await ReflowOven.Api.StartupDiagnostics.LogAuditAsync(sp.GetRequiredService<SystemService>(), app.Logger);
 }
 
 // Seed-only mode: `dotnet run -- seed-only` migrates + seeds and exits (no web server).

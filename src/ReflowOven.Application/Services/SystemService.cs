@@ -80,6 +80,57 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
     public async Task<ConnectivityDto> ConnectivityAsync(CancellationToken ct = default) =>
         new(await system.PingCentralServerAsync(ct));
 
+    /// <summary>
+    /// One read-only census of the database — the single source for the startup "auditoria" log and the
+    /// <c>/api/system/audit</c> endpoint. Counts every category in one pass of efficient <c>CountAsync</c>
+    /// queries (programs over the unfiltered set so soft-deleted/seed rows are visible); empty tables yield 0.
+    /// </summary>
+    public async Task<DatabaseAuditDto> GetDatabaseAuditAsync(CancellationToken ct = default)
+    {
+        // Users — by status and role.
+        var usersTotal = await db.Users.CountAsync(ct);
+        var usersActive = await db.Users.CountAsync(u => u.Status == UserStatus.Ativo, ct);
+        var admins = await db.Users.CountAsync(u => u.Type == UserType.Admin, ct);
+
+        // Programs — bypass the soft-delete/seed query filter to count everything.
+        var allPrograms = db.Programs.IgnoreQueryFilters();
+        var programsTotal = await allPrograms.CountAsync(ct);
+        var programsDeleted = await allPrograms.CountAsync(p => p.IsDeleted, ct);
+        var programsSeed = await allPrograms.CountAsync(p => p.IsSeed && !p.IsDeleted, ct);
+        var programsActive = programsTotal - programsDeleted;
+        var programsUser = programsActive - programsSeed;
+
+        // Executions — by terminal status (Concluído / Falha).
+        var execTotal = await db.Executions.CountAsync(ct);
+        var execConcluido = await db.Executions.CountAsync(e => e.Status == ExecutionStatus.Concluido, ct);
+        var execFalha = await db.Executions.CountAsync(e => e.Status == ExecutionStatus.Falha, ct);
+
+        // Errors / falhas — by severity (Crítico / Alerta / Aviso).
+        var errTotal = await db.Errors.CountAsync(ct);
+        var errCritico = await db.Errors.CountAsync(e => e.Severity == ErrorSeverity.Critico, ct);
+        var errAlerta = await db.Errors.CountAsync(e => e.Severity == ErrorSeverity.Alerta, ct);
+        var errAviso = await db.Errors.CountAsync(e => e.Severity == ErrorSeverity.Aviso, ct);
+
+        // Changes + notifications (with the unread tally).
+        var changes = await db.Changes.CountAsync(ct);
+        var notifTotal = await db.Notifications.CountAsync(ct);
+        var notifUnread = await db.Notifications.CountAsync(n => !n.Read, ct);
+
+        // System log — by level (INFO / Aviso / Erro). `LogLevel` is the domain enum (see Application GlobalUsings).
+        var logInfo = await db.SystemLog.CountAsync(l => l.Level == LogLevel.Info, ct);
+        var logAviso = await db.SystemLog.CountAsync(l => l.Level == LogLevel.Aviso, ct);
+        var logErro = await db.SystemLog.CountAsync(l => l.Level == LogLevel.Erro, ct);
+
+        return new DatabaseAuditDto(
+            new UserAuditDto(usersTotal, usersActive, usersTotal - usersActive, admins),
+            new ProgramAuditDto(programsTotal, programsActive, programsSeed, programsUser, programsDeleted),
+            new ExecutionAuditDto(execTotal, execConcluido, execFalha),
+            new ErrorAuditDto(errTotal, errCritico, errAlerta, errAviso),
+            changes,
+            new NotificationAuditDto(notifTotal, notifUnread),
+            new SystemLogAuditDto(logInfo + logAviso + logErro, logInfo, logAviso, logErro));
+    }
+
     public Task RebootAsync(CancellationToken ct = default) => system.RebootAsync(ct);
 
     public Task ShutdownAsync(CancellationToken ct = default) => system.ShutdownAsync(ct);

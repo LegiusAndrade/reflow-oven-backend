@@ -99,4 +99,7 @@ public sealed class SystemController(SystemService system) : ControllerBase
         await system.ShutdownAsync(ct);
         return NoContent();
     }
+
+    [HttpGet("audit")]
+    public Task<DatabaseAuditDto> Audit(CancellationToken ct) => system.GetDatabaseAuditAsync(ct);
 }

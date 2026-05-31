@@ -2,9 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
-using ReflowOven.Domain.Enums;
 using ReflowOven.Infrastructure.Persistence;
-using DomainLogLevel = ReflowOven.Domain.Enums.LogLevel;
 
 namespace ReflowOven.Api;
 
@@ -56,50 +54,33 @@ public static class StartupDiagnostics
 
     /// <summary>
     /// Logs a one-shot inventory of the database for the operator: users (ativos/inativos/admins),
-    /// programs (fábrica/usuário/removidos) and the log-bearing tables (incl. the system log by level).
+    /// programs (fábrica/usuário/removidos), the report tables (execuções/falhas by status/severity,
+    /// alterações, notificações) and the system log by level. The counting lives in
+    /// <see cref="SystemService.GetDatabaseAuditAsync"/> (shared with the API endpoint); this only formats it.
     /// Never throws — a failure here must not break startup.
     /// </summary>
-    public static async Task LogAuditAsync(ReflowDbContext db, ILogger logger, CancellationToken ct = default)
+    public static async Task LogAuditAsync(SystemService system, ILogger logger, CancellationToken ct = default)
     {
         try
         {
-            // Users — by status and role.
-            var usersTotal = await db.Users.CountAsync(ct);
-            var usersActive = await db.Users.CountAsync(u => u.Status == UserStatus.Ativo, ct);
-            var admins = await db.Users.CountAsync(u => u.Type == UserType.Admin, ct);
-
-            // Programs — bypass the soft-delete/seed query filter to count everything.
-            var allPrograms = db.Programs.IgnoreQueryFilters();
-            var programsTotal = await allPrograms.CountAsync(ct);
-            var programsDeleted = await allPrograms.CountAsync(p => p.IsDeleted, ct);
-            var programsSeed = await allPrograms.CountAsync(p => p.IsSeed && !p.IsDeleted, ct);
-            var programsActive = programsTotal - programsDeleted;
-            var programsUser = programsActive - programsSeed;
-
-            // Report / audit tables.
-            var executions = await db.Executions.CountAsync(ct);
-            var errors = await db.Errors.CountAsync(ct);
-            var changes = await db.Changes.CountAsync(ct);
-            var notifications = await db.Notifications.CountAsync(ct);
-
-            // System log — by level (INFO / Aviso / Erro).
-            var logInfo = await db.SystemLog.CountAsync(l => l.Level == DomainLogLevel.Info, ct);
-            var logAviso = await db.SystemLog.CountAsync(l => l.Level == DomainLogLevel.Aviso, ct);
-            var logErro = await db.SystemLog.CountAsync(l => l.Level == DomainLogLevel.Erro, ct);
-            var logTotal = logInfo + logAviso + logErro;
+            var a = await system.GetDatabaseAuditAsync(ct);
 
             logger.LogInformation(
                 "Auditoria do banco ▸ Usuários: {Total} (ativos {Active}, inativos {Inactive}, admins {Admins}).",
-                usersTotal, usersActive, usersTotal - usersActive, admins);
+                a.Users.Total, a.Users.Active, a.Users.Inactive, a.Users.Admins);
             logger.LogInformation(
                 "Auditoria do banco ▸ Programas: {Total} (ativos {Active} = fábrica {Seed} + usuário {User}; removidos {Deleted}).",
-                programsTotal, programsActive, programsSeed, programsUser, programsDeleted);
+                a.Programs.Total, a.Programs.Active, a.Programs.Seed, a.Programs.User, a.Programs.Deleted);
             logger.LogInformation(
-                "Auditoria do banco ▸ Execuções {Executions} · Falhas {Errors} · Alterações {Changes} · Notificações {Notifications}.",
-                executions, errors, changes, notifications);
+                "Auditoria do banco ▸ Execuções {Executions} (Concluído {Concluido}, Falha {Falha}) · " +
+                "Falhas {Errors} (Crítico {Critico}, Alerta {Alerta}, Aviso {Aviso}) · " +
+                "Alterações {Changes} · Notificações {Notifications} (não lidas {Unread}).",
+                a.Executions.Total, a.Executions.Concluido, a.Executions.Falha,
+                a.Errors.Total, a.Errors.Critico, a.Errors.Alerta, a.Errors.Aviso,
+                a.Changes, a.Notifications.Total, a.Notifications.Unread);
             logger.LogInformation(
                 "Auditoria do banco ▸ Log do sistema: {Total} (INFO {Info}, Aviso {Aviso}, Erro {Erro}).",
-                logTotal, logInfo, logAviso, logErro);
+                a.SystemLog.Total, a.SystemLog.Info, a.SystemLog.Aviso, a.SystemLog.Erro);
         }
         catch (Exception ex)
         {
