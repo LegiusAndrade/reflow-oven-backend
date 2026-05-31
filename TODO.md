@@ -176,13 +176,31 @@ dropdown ("Filtrar por…") só funciona no cliente, sobre a página já carrega
 Falhas→`Errors`, Logs→`SystemLog`. "Usuários inativos" (subconjunto de linhas de `Users`) é rateado
 proporcionalmente. O total continua sendo o `pg_database_size` real.
 
-### ✅ H. Diff antes/depois em Alterações — **Feito (curva antes×depois por ponto)**
-`GET /api/changes/{id}` traz `ConfigBullets` + `Points` (diff por ponto com `Role`). Numa **edição**,
-o `ProgramService.UpdateAsync` agora grava a curva **anterior** como `changed-before` (snapshot tirado
-antes de sobrescrever o perfil) **e** a nova como `changed-after`, então o front desenha as duas curvas
-filtrando por `Role` (índices 1-based reiniciam por papel). Mantida a decisão de **não** persistir os
-perfis inteiros `BeforeProfile`/`AfterProfile`: reusa a coleção `Points` (jsonb) e o enum
-`ChangePointRole` já existentes — **sem migração**.
+### ✅ H. Diff antes/depois em Alterações — **Feito (diff por ponto, antes×depois)**
+`GET /api/changes/{id}` traz `ConfigBullets` + `Points`. Numa **edição**, o `ProgramService.UpdateAsync`
+calcula um **diff por ponto** (posicional) entre a curva antiga e a nova: ponto igual → `unchanged` (1
+linha); ponto que mudou → `changed-before` + `changed-after` no **mesmo índice**; ponto só na nova →
+`added`; só na antiga → `removed`. O front remonta a curva *antes* de `removed`+`changed-before`+`unchanged`
+e a *depois* de `added`+`changed-after`+`unchanged`, e rotula cada ponto pelo papel (tabelas
+Adicionado/Alterado/Removido). Sem persistir `BeforeProfile`/`AfterProfile`: reusa `Points` (jsonb) + o
+enum `ChangePointRole` (novo membro `unchanged`) — **sem migração**. História limitada a
+`ChangeRetentionPerProgramMax` (10) por programa, e `GET /api/changes?programId=` lista a de um programa.
+
+---
+
+## Pendentes (novos — 2026-05-31)
+
+### ✅ I. Subir o limite de pontos do perfil 30 → 100 — **Feito**
+`DomainConstants.ProfileMaxPoints` agora é **100** e governa os **dois** caminhos: o cap de **segmentos**
+(`req.Segments`) e o de **pontos do import direto** (`req.Profile`) — a `ProfilePointsMax` (adicionada antes,
+não commitada) foi **unificada** nela. Trace ao vivo segue coerente: `RunMeasuredMaxPoints` (600) decima as
+**amostras medidas**, não o perfil — a curva derivada de 100 segmentos pode chegar a ~1200 pontos, usada só na
+interpolação (`TempAt`), sem inflar o armazenamento da execução. **Sem migração** (constante, não schema). O
+front espelha `100` em `limits.ts` e mostra `x/100` + tempo total.
+> Já OK no backend (o front só consome): histórico de edições por programa já limitado a
+> `ChangeRetentionPerProgramMax = 10`, e `GET /api/changes` aceita `programId` (dá pra listar as últimas 10
+> edições e montar o gráfico multi-curva). Carga de CPU já vem em `SystemMetricsDto.CpuLoadPercent`
+> (média dos núcleos) — falta só o front mostrar.
 
 ---
 
