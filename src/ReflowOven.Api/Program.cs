@@ -157,10 +157,15 @@ using (var scope = app.Services.CreateScope())
     var sp = scope.ServiceProvider;
     var db = sp.GetRequiredService<ReflowDbContext>();
     var clock = sp.GetRequiredService<IClock>();
-    await db.Database.MigrateAsync();
+
+    // Migrate (creating the DB + logging a Warning when it doesn't exist yet on a fresh PC), then seed.
+    await ReflowOven.Api.StartupDiagnostics.MigrateAndLogAsync(db, app.Logger);
     await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock);
     if (app.Configuration.GetValue<bool>("Seed:Demo"))
         await DbSeeder.SeedDemoAsync(db, clock);
+
+    // One-shot startup "auditoria" of the persisted/seeded data (users, programs, logs by type).
+    await ReflowOven.Api.StartupDiagnostics.LogAuditAsync(db, app.Logger);
 }
 
 // Seed-only mode: `dotnet run -- seed-only` migrates + seeds and exits (no web server).
