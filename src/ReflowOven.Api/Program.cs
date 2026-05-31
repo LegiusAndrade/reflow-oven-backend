@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
@@ -57,6 +58,17 @@ builder.Services.AddSignalR().AddJsonProtocol(o =>
 
 // --- AuthN (JWT, also accepted via the SignalR query string) ----------------------------
 var jwt = builder.Configuration.GetSection(JwtOptions.Section).Get<JwtOptions>() ?? new JwtOptions();
+
+// Never run outside Development on the throwaway dev key (or an empty one): real deployments must
+// supply a strong secret via environment variable (Jwt__SigningKey) or user-secrets — never hardcoded.
+const string devSigningKeyPlaceholder = "dev-only-change-me-please-use-32-bytes-minimum!";
+if (!builder.Environment.IsDevelopment() &&
+    (string.IsNullOrWhiteSpace(jwt.SigningKey) || jwt.SigningKey == devSigningKeyPlaceholder))
+{
+    throw new InvalidOperationException(
+        "Jwt:SigningKey ausente ou padrão. Configure um segredo forte via Jwt__SigningKey (env) ou user-secrets fora de Development.");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -97,6 +109,20 @@ builder.Services.AddCors(o => o.AddPolicy(corsPolicy, p =>
     p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 builder.Services.AddHealthChecks();
+
+// --- HTTP request/response logging (with redaction) — wired here, enabled in Development only --------
+builder.Services.AddHttpLogging(o =>
+{
+    o.LoggingFields = HttpLoggingFields.RequestPath | HttpLoggingFields.RequestMethod
+        | HttpLoggingFields.RequestQuery | HttpLoggingFields.RequestBody
+        | HttpLoggingFields.ResponseStatusCode | HttpLoggingFields.ResponseBody | HttpLoggingFields.Duration;
+    o.RequestBodyLogLimit = 4096;
+    o.ResponseBodyLogLimit = 4096;
+    o.MediaTypeOptions.AddText("application/json");
+    o.CombineLogs = true;
+});
+// Bodies of /api/auth/* (passwords, tokens) are dropped from the logs by this interceptor.
+builder.Services.AddHttpLoggingInterceptor<AuthRedactionInterceptor>();
 
 // --- OpenAPI document (served for the Scalar UI; declares the JWT bearer scheme) ---------
 builder.Services.AddOpenApi(options =>
@@ -149,6 +175,9 @@ app.UseSerilogRequestLogging();
 
 if (app.Environment.IsDevelopment())
 {
+    // Verbose request/response logging (bodies redacted on /api/auth) — dev only, to keep prod logs lean.
+    app.UseHttpLogging();
+
     // OpenAPI doc at /openapi/v1.json, served through the Scalar reference UI at /scalar.
     // Both are endpoints, so they need AllowAnonymous to escape the authenticated-by-default policy.
     app.MapOpenApi().AllowAnonymous();
