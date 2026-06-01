@@ -39,6 +39,9 @@ public static class DependencyInjection
         services.Configure<TechnicianOptions>(config.GetSection(TechnicianOptions.Section));
         services.AddSingleton<ITechnicianCredentials, TechnicianCredentials>();
 
+        services.Configure<MasterOptions>(config.GetSection(MasterOptions.Section));
+        services.AddSingleton<IMasterCredentials, MasterCredentials>();
+
         services.Configure<EmailOptions>(config.GetSection(EmailOptions.Section));
         var emailMode = config.GetSection(EmailOptions.Section)["Mode"];
         if (string.Equals(emailMode, "Smtp", StringComparison.OrdinalIgnoreCase))

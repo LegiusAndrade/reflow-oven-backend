@@ -16,10 +16,14 @@ public sealed record UserDto(
 
 public sealed record UserEventDto(string Label, int Count);
 
+/// <summary>
+/// Create payload (MODEL B): the system generates the initial password and emails it; the admin never
+/// sets or sees it, so there is no <c>Password</c> field. The user must change it within
+/// <see cref="DomainConstants.PasswordChangeWithinDays"/> days or the provisional password expires at login.
+/// </summary>
 public sealed record CreateUserRequest(
     string Name,
     string Email,
-    string Password,
     UserType Type = UserType.Regular,
     UserStatus Status = UserStatus.Ativo);
 

@@ -36,7 +36,8 @@ public sealed class ReportService(IAppDbContext db)
             e.Points.Select(p => new ExecProfilePointDto(p.T, p.Temp, p.Kind)).ToList(),
             e.Comparison.Select(c => new ProfileComparisonRowDto(c.TempProg, c.TempReal, c.TimeProgSeconds, c.TimeRealSeconds, c.StageIndex)).ToList(),
             e.Events.OrderBy(v => v.OrderIndex).ThenBy(v => v.At).Select(MapEvent).ToList(),
-            MapSnapshot(e.Trace));
+            MapSnapshot(e.Trace),
+            e.FailureReason, e.FaultTypeCode, e.LinkedErrorId);
     }
 
     // --- errors ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ public sealed class ReportService(IAppDbContext db)
         }
         if (q.From is not null) query = query.Where(c => c.At >= q.From);
         if (ToExclusive(q) is { } toExc) query = query.Where(c => c.At < toExc);
+        if (q.Before is not null) query = query.Where(c => c.At < q.Before);
         if (EnumWire.TryFromWire<ChangeAction>(q.Action, out var action)) query = query.Where(c => c.Action == action);
         if (!string.IsNullOrWhiteSpace(q.ProgramId)) query = query.Where(c => c.ProgramId == q.ProgramId);
 
@@ -101,10 +103,77 @@ public sealed class ReportService(IAppDbContext db)
     {
         var c = await db.Changes.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new NotFoundException("Alteração não encontrada.");
+        var rows = c.Points.OrderBy(p => p.Index)
+            .Select(p => new ChangePointRowDto(p.Index, p.Temp, p.TimeSec, p.Ramp, p.Role)).ToList();
+
+        // Consolidate the stored role-rows (a changed point is two rows) into one diff per index, plus the
+        // before/after curves the editor charts. Config changes have no points → no diff/curves.
+        ChangeDiffDto? diff = null;
+        IReadOnlyList<ProfilePointDto>? beforeCurve = null;
+        IReadOnlyList<ProfilePointDto>? afterCurve = null;
+        if (rows.Count > 0)
+            (diff, beforeCurve, afterCurve) = BuildChangeDiff(rows);
+
         return new ChangeDetailDto(
             c.Id, c.At, c.Action, c.Target, c.UserName, c.ProgramId, c.DetailKind,
-            c.ConfigBullets,
-            c.Points.OrderBy(p => p.Index).Select(p => new ChangePointRowDto(p.Index, p.Temp, p.TimeSec, p.Ramp, p.Role)).ToList());
+            c.ConfigBullets, rows, diff, beforeCurve, afterCurve);
+    }
+
+    /// <summary>
+    /// Collapse the persisted <see cref="ChangePointRole"/> rows into a consolidated per-index diff:
+    /// a changed point's before+after pair becomes one "changed" row with the differing fields; added/
+    /// removed/unchanged map straight through. Derives the before curve (rows with a before side:
+    /// removed + changed-before + unchanged) and the after curve (added + changed-after + unchanged),
+    /// ordered by index.
+    /// </summary>
+    private static (ChangeDiffDto Diff, List<ProfilePointDto> BeforeCurve, List<ProfilePointDto> AfterCurve)
+        BuildChangeDiff(IReadOnlyList<ChangePointRowDto> rows)
+    {
+        var points = new List<ChangePointDiffDto>();
+        foreach (var g in rows.GroupBy(r => r.Index).OrderBy(g => g.Key))
+        {
+            var bRow = g.FirstOrDefault(r => r.Role is ChangePointRole.ChangedBefore or ChangePointRole.Removed or ChangePointRole.Unchanged);
+            var aRow = g.FirstOrDefault(r => r.Role is ChangePointRole.ChangedAfter or ChangePointRole.Added or ChangePointRole.Unchanged);
+
+            var before = bRow is null ? null : new ChangePointValueDto(bRow.Temp, bRow.TimeSec, bRow.Ramp);
+            var after = aRow is null ? null : new ChangePointValueDto(aRow.Temp, aRow.TimeSec, aRow.Ramp);
+
+            string status;
+            if (before is not null && after is not null)
+                status = g.Any(r => r.Role is ChangePointRole.ChangedBefore or ChangePointRole.ChangedAfter) ? "changed" : "unchanged";
+            else if (after is not null) status = "added";
+            else status = "removed";
+
+            var fields = new List<string>();
+            if (status == "changed")
+            {
+                if (before!.Temp != after!.Temp) fields.Add("temp");
+                if (before.TimeSec != after.TimeSec) fields.Add("timeSec");
+                if (before.Ramp != after.Ramp) fields.Add("ramp");
+            }
+
+            points.Add(new ChangePointDiffDto(g.Key, status, before, after, fields));
+        }
+
+        var changedFieldCounts = points
+            .SelectMany(p => p.ChangedFields)
+            .GroupBy(f => f)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var summary = new ChangeDiffSummaryDto(
+            TotalChanges: points.Count(p => p.Status != "unchanged"),
+            Added: points.Count(p => p.Status == "added"),
+            Removed: points.Count(p => p.Status == "removed"),
+            Changed: points.Count(p => p.Status == "changed"),
+            Unchanged: points.Count(p => p.Status == "unchanged"),
+            ChangedFields: changedFieldCounts);
+
+        var beforeCurve = points.Where(p => p.Before is not null)
+            .Select(p => new ProfilePointDto(p.Before!.TimeSec, p.Before.Temp)).ToList();
+        var afterCurve = points.Where(p => p.After is not null)
+            .Select(p => new ProfilePointDto(p.After!.TimeSec, p.After.Temp)).ToList();
+
+        return (new ChangeDiffDto(summary, points), beforeCurve, afterCurve);
     }
 
     // --- fault catalog & system log -------------------------------------------------------

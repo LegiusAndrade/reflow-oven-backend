@@ -39,11 +39,14 @@ public sealed class ProgramsController(ProgramService programs, ICurrentUser cur
     }
 
     [HttpPost("{id}/favorite")]
-    public async Task<ActionResult<FavoriteResult>> ToggleFavorite(string id, CancellationToken ct)
+    public async Task<ActionResult<FavoriteResult>> ToggleFavorite(
+        string id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] SetFavoriteRequest? body,
+        CancellationToken ct)
     {
         if (current.UserId is not { } userId)
             throw new ForbiddenAppException("Sessão sem usuário não pode favoritar.");
-        var favorite = await programs.ToggleFavoriteAsync(id, userId, ct);
+        var favorite = await programs.ToggleFavoriteAsync(id, userId, body?.Favorite, ct);
         return new FavoriteResult(favorite);
     }
 

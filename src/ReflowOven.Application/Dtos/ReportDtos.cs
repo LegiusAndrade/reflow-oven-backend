@@ -40,7 +40,10 @@ public sealed record ExecutionDetailDto(
     IReadOnlyList<ExecProfilePointDto> Points,
     IReadOnlyList<ProfileComparisonRowDto> Comparison,
     IReadOnlyList<LogEventDto> Events,
-    FailureSnapshotDto Trace);
+    FailureSnapshotDto Trace,
+    string? FailureReason = null,
+    string? ErrorCode = null,
+    Guid? LinkedErrorId = null);
 
 // --- errors -----------------------------------------------------------------------------
 public sealed record SnapshotSeriesDto(string Name, string Unit, string Color, double[] Values);
@@ -78,6 +81,33 @@ public sealed record ErrorDetailDto(
 // --- changes ----------------------------------------------------------------------------
 public sealed record ChangePointRowDto(int Index, int Temp, int TimeSec, RampShape Ramp, ChangePointRole Role);
 
+/// <summary>One side of a per-point diff (before or after edit). Null when the point exists on only one side.</summary>
+public sealed record ChangePointValueDto(double Temp, int TimeSec, RampShape Ramp);
+
+/// <summary>
+/// Consolidated per-point diff row: exactly one row per index. <c>Status</c> is
+/// <c>unchanged|changed|added|removed</c>; <c>ChangedFields</c> lists which of
+/// <c>temp|timeSec|ramp</c> differ (only for status=changed).
+/// </summary>
+public sealed record ChangePointDiffDto(
+    int Index,
+    string Status,
+    ChangePointValueDto? Before,
+    ChangePointValueDto? After,
+    IReadOnlyList<string> ChangedFields);
+
+public sealed record ChangeDiffSummaryDto(
+    int TotalChanges,
+    int Added,
+    int Removed,
+    int Changed,
+    int Unchanged,
+    IReadOnlyDictionary<string, int> ChangedFields);
+
+public sealed record ChangeDiffDto(
+    ChangeDiffSummaryDto Summary,
+    IReadOnlyList<ChangePointDiffDto> Points);
+
 public sealed record ChangeSummaryDto(
     Guid Id,
     DateTimeOffset At,
@@ -95,7 +125,10 @@ public sealed record ChangeDetailDto(
     string? ProgramId,
     ChangeDetailKind DetailKind,
     IReadOnlyList<string>? ConfigBullets,
-    IReadOnlyList<ChangePointRowDto> Points);
+    IReadOnlyList<ChangePointRowDto> Points,
+    ChangeDiffDto? Diff = null,
+    IReadOnlyList<ProfilePointDto>? BeforeCurve = null,
+    IReadOnlyList<ProfilePointDto>? AfterCurve = null);
 
 // --- fault catalog & system log ---------------------------------------------------------
 public sealed record FaultTypeDto(string Code, ErrorSeverity Severity, string Message);
@@ -118,4 +151,7 @@ public sealed record ReportQuery(
     string? Action = null,
     string? Severity = null,
     string? Level = null,
-    string? ProgramId = null);
+    string? ProgramId = null,
+    /// <summary>Strictly-earlier cursor (exclusive): keep rows with <c>At &lt; Before</c>. Distinct
+    /// from <c>To</c> (inclusive end-of-day).</summary>
+    DateTimeOffset? Before = null);

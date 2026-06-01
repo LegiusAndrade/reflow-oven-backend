@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ReflowOven.Application.Abstractions;
 using ReflowOven.Application.Services;
 
 namespace ReflowOven.Application;
@@ -20,6 +22,9 @@ public static class DependencyInjection
         services.AddScoped<DeviceService>();
         services.AddScoped<SystemService>();
         services.AddScoped<NotificationService>();
+        services.AddScoped<SystemLogService>();
+        // Fallback no-op push sink; the Api layer overrides this with the SignalR implementation.
+        services.TryAddSingleton<ISystemLogSink, NullSystemLogSink>();
         return services;
     }
 }

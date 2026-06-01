@@ -9,6 +9,7 @@ namespace ReflowOven.Infrastructure.Persistence;
 public static partial class DbSeeder
 {
     private const int SnapshotSamples = 40;
+    private const string EditChurnProgramId = "demo-edit-churn";
 
     private static readonly string[][] ConfigBulletSets =
     [
@@ -67,9 +68,28 @@ public static partial class DbSeeder
             for (var i = 0; i < 14; i++)
                 db.Errors.Add(BuildError(i, now, faults, programs, users));
 
+        // Item 4: one failed execution wired to a real ErrorLogEntry via LinkedErrorId so the Execução
+        // detail can deep-link to the Erros report. Idempotent: only when no linked failure exists yet.
+        if (faults.Count > 0 && !await db.Executions.AnyAsync(e => e.LinkedErrorId != null, ct))
+            db.Executions.Add(BuildLinkedFailureExecution(db, now, programs, users, faults));
+
         if (!await db.Changes.AnyAsync(ct))
+        {
             for (var i = 0; i < 16; i++)
                 db.Changes.Add(BuildChange(i, now, programs, users));
+
+            // Item J: one program edited ~12 times so the Alterações report demonstrates the per-program
+            // retention cutoff (ChangeRetentionPerProgramMax). Retention is enforced on WRITE only
+            // (AuditService.PruneProgramChangesAsync keeps the most recent N), so mirror that here: build
+            // 12 rows (1 Criado + 11 Editado) and persist only the most recent N by timestamp — the 2
+            // oldest (the Criado + the first Editado) drop out, visibly showing the cutoff.
+            var churnProgram = await SeedEditChurnProgramAsync(db, ct);
+            var churn = BuildEditChurnHistory(churnProgram, now, users);
+            foreach (var c in churn
+                         .OrderByDescending(c => c.At)
+                         .Take(DomainConstants.ChangeRetentionPerProgramMax))
+                db.Changes.Add(c);
+        }
 
         if (!await db.SystemLog.AnyAsync(ct))
             for (var i = 0; i < 45; i++)
@@ -212,6 +232,170 @@ public static partial class DbSeeder
             new() { Name = "Fan Diss.", Unit = "rpm", Color = "#34d399", Values = Gen(x => 2500 + 2500 * x) },
             new() { Name = "Alvo", Unit = "°C", Color = "#93c5fd", Values = Gen(x => 30 + 230 * x) },
         ];
+    }
+
+    /// <summary>Item 4: a failed execution joined to a freshly-created ErrorLogEntry via
+    /// LinkedErrorId/FaultTypeCode, so the Execução detail can deep-link to the Erros report.</summary>
+    private static ExecutionReport BuildLinkedFailureExecution(
+        ReflowDbContext db, DateTimeOffset now, List<ReflowProgram> programs, List<User> users, List<FaultType> faults)
+    {
+        var program = programs[0];
+        var user = users[0];
+        var fault = faults.FirstOrDefault(f => f.Severity == ErrorSeverity.Critico) ?? faults[0];
+        var started = now.AddHours(-3);
+        var faultAtT = program.Profile.Count > 1 ? (int)Math.Round(program.Profile[^1].T) / 2 : 120;
+        var peak = program.Profile.Count > 0 ? (int)Math.Round(program.Profile.Max(p => p.Temp)) : 240;
+
+        var error = new ErrorLogEntry
+        {
+            Id = Guid.NewGuid(),
+            At = started.AddSeconds(faultAtT),
+            FaultTypeCode = fault.Code,
+            Severity = fault.Severity,
+            Message = fault.Message,
+            UserId = user.Id,
+            UserName = user.Name,
+            ProgramId = program.Id,
+            ProgramName = program.Name,
+            OvenTemp = peak,
+            PcbTemp = 72,
+            StartAt = started,
+            EndAt = started.AddSeconds(faultAtT),
+            InputVoltage = 127,
+            OutputVoltage = 150,
+            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries() },
+            Events = [new() { At = started.AddSeconds(faultAtT), Kind = LogEventKind.Falha, Message = fault.Message, OrderIndex = 0 }],
+        };
+        db.Errors.Add(error);
+
+        // Curve: the programmed points + the measured points up to the fault.
+        var points = new List<ExecProfilePoint>();
+        foreach (var p in program.Profile)
+            points.Add(new ExecProfilePoint { T = (int)Math.Round(p.T), Temp = (int)Math.Round(p.Temp), Kind = ProfileRole.Programmed });
+        var cut = Math.Max(2, (int)(program.Profile.Count * 0.62));
+        for (var k = 0; k < cut && k < program.Profile.Count; k++)
+        {
+            var p = program.Profile[k];
+            points.Add(new ExecProfilePoint { T = (int)Math.Round(p.T), Temp = Math.Max(20, (int)Math.Round(p.Temp) - 3), Kind = ProfileRole.Measured });
+        }
+
+        return new ExecutionReport
+        {
+            Id = Guid.NewGuid(),
+            ProgramId = program.Id,
+            ProgramName = program.Name,
+            UserId = user.Id,
+            UserName = user.Name,
+            StartedAt = started,
+            DurationSeconds = faultAtT,
+            Status = ExecutionStatus.Falha,
+            PeakTemp = peak,
+            PeakCurrent = 18m,
+            FaultAtT = faultAtT,
+            FaultAtTemp = peak,
+            FailureReason = fault.Message,
+            FaultTypeCode = fault.Code,
+            LinkedErrorId = error.Id,
+            CreatedAt = error.At,
+            Points = points,
+            Trace = new FailureSnapshot { DurationSec = faultAtT, Series = BuildSnapshotSeries() },
+            Events =
+            [
+                new() { At = started, Kind = LogEventKind.Info, Message = "Execução iniciada", OrderIndex = 0 },
+                new() { At = error.At, Kind = LogEventKind.Falha, Message = $"Falha: {fault.Message}", OrderIndex = 1 },
+            ],
+        };
+    }
+
+    /// <summary>Item J: idempotently create the one program whose edit history demonstrates the retention
+    /// cutoff. A normal (non-seed, non-deleted) program so it shows in the gallery and the Alterações report.</summary>
+    private static async Task<ReflowProgram> SeedEditChurnProgramAsync(ReflowDbContext db, CancellationToken ct)
+    {
+        var existing = await db.Programs.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == EditChurnProgramId, ct);
+        if (existing is not null) return existing;
+
+        var program = new ReflowProgram
+        {
+            Id = EditChurnProgramId,
+            Name = "Perfil Teste de Edições",
+            Description = "Editado várias vezes (demo da retenção do histórico de alterações).",
+            RunCount = 0,
+            LastUsed = null,
+            IsSeed = false,
+            Profile =
+            [
+                new() { T = 0, Temp = 25 },
+                new() { T = 90, Temp = 150 },
+                new() { T = 180, Temp = 180 },
+                new() { T = 210, Temp = 217 },
+                new() { T = 240, Temp = 245 },
+                new() { T = 270, Temp = 210 },
+                new() { T = 330, Temp = 120 },
+                new() { T = 390, Temp = 45 },
+            ],
+        };
+        db.Programs.Add(program);
+        return program;
+    }
+
+    /// <summary>
+    /// Item J: 12 program-change rows for one program — 1 Criado + 11 Editado, oldest→newest, each Editado
+    /// nudging two mid-curve points warmer so the per-point diff exercises ChangedBefore/ChangedAfter
+    /// alongside Unchanged. Timestamps strictly increase so the most-recent-N retention cut is deterministic.
+    /// </summary>
+    private static List<ChangeLogEntry> BuildEditChurnHistory(ReflowProgram program, DateTimeOffset now, List<User> users)
+    {
+        var rows = new List<ChangeLogEntry>();
+        var basePts = program.Profile.Skip(1).Take(8).ToList(); // skip the t=0/25 anchor
+        const int edits = 11;
+
+        DateTimeOffset At(int rev) => now.AddDays(-30).AddHours(rev * 6); // rev 0 oldest, rev 11 newest
+
+        ChangeLogEntry Row(int rev, ChangeAction action, List<ChangePointRow> points) => new()
+        {
+            Id = Guid.NewGuid(),
+            At = At(rev),
+            Action = action,
+            Target = program.Name,
+            UserId = users[rev % users.Count].Id,
+            UserName = users[rev % users.Count].Name,
+            ProgramId = program.Id,
+            DetailKind = ChangeDetailKind.Program,
+            Points = points,
+        };
+
+        // rev 0: Criado — the whole curve as Added.
+        rows.Add(Row(0, ChangeAction.Criado,
+            [.. basePts.Select((p, k) => new ChangePointRow
+            {
+                Index = k + 1,
+                Temp = (int)Math.Round(p.Temp),
+                TimeSec = (int)Math.Round(p.T),
+                Ramp = RampShape.Linear,
+                Role = ChangePointRole.Added,
+            })]));
+
+        // rev 1..11: Editado — bump points 4 & 5 (peak region) by +rev °C; the rest stay Unchanged.
+        for (var rev = 1; rev <= edits; rev++)
+        {
+            var diff = new List<ChangePointRow>();
+            for (var k = 0; k < basePts.Count; k++)
+            {
+                var t = (int)Math.Round(basePts[k].T);
+                var temp = (int)Math.Round(basePts[k].Temp);
+                if (k is 3 or 4)
+                {
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedBefore });
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp + rev, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedAfter });
+                }
+                else
+                {
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Unchanged });
+                }
+            }
+            rows.Add(Row(rev, ChangeAction.Editado, diff));
+        }
+        return rows;
     }
 
     private static ChangeLogEntry BuildChange(int i, DateTimeOffset now, List<ReflowProgram> programs, List<User> users)

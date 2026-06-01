@@ -216,7 +216,7 @@ front espelha `100` em `limits.ts` e mostra `x/100` + tempo total.
 
 ## Pendentes (adicionados pelo usuário)
 
-### ⛔ J. Programa de teste com +10 edições (relatório de Alterações)
+### ✅ J. Programa de teste com +10 edições (relatório de Alterações) — **Feito**
 Criar no BD um programa **editado ~12×** para exercitar o relatório de Alterações e ver a retenção
 (`ChangeRetentionPerProgramMax = 10`) cortando para as 10 mais recentes. Fazer via `DbSeeder.Demo`
 (ou script pontual) gerando um `ReflowProgram` + uma sequência de `ChangeLogEntry` com diff por ponto.
@@ -231,6 +231,19 @@ BREAKPOINTS. Opcional no front: não oferecer troca de tema na sessão técnica.
 
 
 ## Validação 2026-05-31 (pedidos do front)
+
+> ## ✅ Implementado no backend (2026-05-31)
+> Todos os itens 1–6 **e** o item J foram implementados nesta rodada (build + 78 testes verdes, **1 migração**: `AddExecutionFailureLink`). Decisões e contrato pro front:
+> - **1. Regular inicia/para execução:** policy `OperatorOrAdmin` (= `RequireRole(Admin, Regular)`) em `POST /api/runs/start` e `/stop`. O técnico (role Admin) continua passando. Sem mudança de DTO — o 403 some pro Regular.
+> - **2. Senha do cadastro = MODELO B + vencimento duro.** `CreateUserRequest` **perdeu** `Password` (o front deve parar de enviar/coletar senha). A senha é gerada e enviada por e-mail; o usuário troca via `change-password`. **Novo:** se logar com a senha provisória **vencida** (`PasswordIssuedAt` + `PasswordChangeWithinDays`=7 dias), o backend gera/`envia` uma nova (throttle 1×/dia, e-mail **antes** de salvar o hash pra não travar ninguém) e **rejeita** o login com a string exata: `"Sua senha provisória expirou. Enviamos uma nova senha para o seu e-mail."` → o front mostra isso e manda consultar o e-mail. (Sem coluna nova: reusa `PasswordIssuedAt`.)
+> - **3. Status `Abortado`:** novo membro de `ExecutionStatus` (literal de wire e de filtro = `"Abortado"`, sem acento). Parada manual agora persiste como `Abortado` (não mais `Falha`). Front: tratar o 3º status (badge/filtro). Sem migração.
+> - **4. Motivo da falha + link:** `ExecutionDetailDto` ganhou `failureReason`/`errorCode` (=`FaultTypeCode`)/`linkedErrorId` (nuláveis). Em falha com fault catalogado (E-1xx) o backend grava um `ErrorLogEntry` e liga via `linkedErrorId` → deep-link pra `GET /api/errors/{id}`. Abort/limpo ficam `null`. (Migração `AddExecutionFailureLink`.)
+> - **5. Favoritar idempotente:** `POST /api/programs/{id}/favorite` aceita corpo opcional `{ "favorite": bool }` (set idempotente); sem corpo continua **toggle** (compatível). Resposta `{ "favorite": bool }` inalterada. Delete segue 204.
+> - **6. Diff estruturado:** `GET /api/changes/{id}` ganhou `diff` (`summary` + `points[]` consolidados: 1 linha por índice, `status` ∈ `unchanged|changed|added|removed`, `changedFields` ∈ `temp|timeSec|ramp`) + `beforeCurve`/`afterCurve`; `Points` legado mantido (transição). `GET /api/changes?before=<ISO>` filtra estritamente anterior (exclusivo). Sem migração.
+> - **J. Programa de teste:** `DbSeeder.Demo` semeia "Perfil Teste de Edições" com 12 edições, persistindo só as 10 mais recentes (a retenção é na escrita), pra exibir o corte do histórico.
+>
+> Detalhe de cada item (necessidade/proposta/consumo) permanece abaixo, como referência.
+
 
 Lote de pedidos do front gerados a partir do feedback da Validação 2026-05-31. Cada seção segue o formato **Necessidade / Situação atual / Proposta (endpoint/DTO) / Como o front vai consumir / Dúvidas-decisões**, com citações dos arquivos reais de ambos os repos.
 
@@ -530,7 +543,13 @@ Regra: se `password` presente → `Validation.ValidatePassword(req.Password)` + 
 4. Parâmetro de anterioridade: nome `before` (preferência do FE) ou `maxDate`? E semântica **exclusiva** (`<`) confirmada, para não reincluir a edição aberta?
 5. Manter `ChangePointRole`/o storage atual (consolidação só na leitura, **sem migração**) é aceitável, certo? Assim este item é puramente um refinamento de DTO + um filtro de query sobre o item H.
 
-### 7. Usuário Master (dev/superusuário) + aba "Log" do Diagnóstico
+### ✅ 7. Usuário Master (dev/superusuário) + aba "Log" do Diagnóstico — **Feito**
+
+> **Implementado no backend (2026-05-31)** (build + 35 testes verdes, **sem migração** — `UserType` é coluna `text` sem CHECK):
+> - **Papel `Master`:** novo membro de `UserType` (wire `"Master"`, sem `[JsonStringEnumMemberName]`). O JWT já emite `role = Type.ToString()`, então o Master recebe `role:"Master"` sem mudança no `JwtTokenService`. As policies `AdminOnly` **e** `OperatorOrAdmin` passaram a aceitar `Master` (senão o Master tomaria 403 ao iniciar/parar execução) → herda **tudo** de Admin + (no front) a aba Log.
+> - **Seed do Master (1 só, blindado):** `IMasterCredentials`/`MasterOptions` (config, seção `Master`, placeholder dev `dev.pandewilly`/`pandewilly`). `DbSeeder` cria o Master com guard idempotente próprio (`!Users.Any(Type==Master)`) — aparece também em bancos já semeados. `MustChangePassword=false` (nunca expira). `FactoryResetAsync` recria o Master após o wipe. `UserService` bloqueia: criar com `Type=Master` (400), editar/promover Master (403), remover Master (403), e **esconde** o Master da grade de Usuários (`ListAsync`). `Program.cs` faz **fail-fast** fora de Development se `Master:Password` ainda for o placeholder.
+> - **Hub SignalR de log em tempo real:** `/hubs/systemlog` empurra `SystemLogDto` no evento **`SystemLogLine`** a cada nova entrada. `RunManager.FinalizeAsync` (Concluída→Info / Abortada→Aviso / Falha→Erro) e `SystemMonitorService.RaiseAsync` (servidor central / atualização / disco) agora gravam uma linha de `SystemLog` **no mesmo unit-of-work** (sem 2º commit) e empurram após o save (Id já populado). `ISystemLogSink` com `NullSystemLogSink` de fallback (Application) sobrescrito por `SignalRSystemLogSink` (Api). O front pode trocar o polling de 2s por assinatura SignalR (`conn.on("SystemLogLine", …)`), com o mesmo `SystemLogDto` que `GET /api/system-log` já retorna.
+> - **Login do Master:** `dev.pandewilly` / `pandewilly` (dev). Em produção, defina `Master__Password` via env.
 
 **Necessidade:** O front ganhou uma aba **Diagnóstico → Log** (visor de log em tempo real) que deve ser
 visível **apenas** para um único usuário **Master** (dev) — "só vai ter ele e mais ninguém". O Master é um

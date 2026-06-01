@@ -137,6 +137,21 @@ public static class Defaults
     /// <summary>The single Admin kept after a factory reset.</summary>
     public static SeedUser FactoryAdmin() => new("lucas.silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo);
 
+    /// <summary>Builds the single dev <c>Master</c> superuser row from config-bound credentials. Shared by
+    /// the first-run seeder and the factory reset so the Master always exists (and survives a reset).
+    /// <c>MustChangePassword=false</c>: a dev superuser is never force-expired by the login gate.</summary>
+    public static User BuildMasterUser(IMasterCredentials creds, IPasswordHasher hasher, IClock clock) => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = creds.Username,
+        Email = creds.Email,
+        PasswordHash = hasher.Hash(creds.Password),
+        Type = UserType.Master,
+        Status = UserStatus.Ativo,
+        CreatedAt = clock.UtcNow,
+        MustChangePassword = false,
+    };
+
     // --- Programs (factory default + catalog) ---------------------------------------------
     public static ReflowProgram FactoryProgram() => Catalog(
         FactoryProgramId, "Perfil Padrão", 0, null,

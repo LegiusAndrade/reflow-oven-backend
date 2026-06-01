@@ -13,6 +13,7 @@ public sealed class RunManager(
     IServiceScopeFactory scopeFactory,
     IPowerBoard board,
     ITelemetrySink sink,
+    ISystemLogSink systemLog,
     IClock clock,
     ILogger<RunManager> logger) : IRunManager
 {
@@ -92,7 +93,8 @@ public sealed class RunManager(
         try
         {
             if (_active is not { Status: RunStatus.Running } run) return null;
-            await FinalizeAsync(run, RunStatus.Aborted, ct);
+            // A manual stop is a user abort, never a catalogued fault (the simulator raises none).
+            await FinalizeAsync(run, RunStatus.Aborted, null, ct);
             return BuildStatus(run);
         }
         finally
@@ -128,7 +130,7 @@ public sealed class RunManager(
             await sink.PublishTraceAsync(run.RunId, sample);
 
             if (elapsed >= run.TotalSeconds)
-                await FinalizeAsync(run, RunStatus.Done, ct);
+                await FinalizeAsync(run, RunStatus.Done, null, ct);
         }
         finally
         {
@@ -136,12 +138,25 @@ public sealed class RunManager(
         }
     }
 
-    private async Task FinalizeAsync(ActiveRun run, RunStatus status, CancellationToken ct)
+    private async Task FinalizeAsync(ActiveRun run, RunStatus status, FaultInfo? fault, CancellationToken ct)
     {
         await board.StopAsync(ct);
         run.Status = status;
         var endedAt = clock.UtcNow;
         var duration = (int)Math.Round((endedAt - run.StartedAt).TotalSeconds);
+
+        var execStatus = status switch
+        {
+            RunStatus.Done => ExecutionStatus.Concluido,
+            RunStatus.Aborted => ExecutionStatus.Abortado,
+            _ => ExecutionStatus.Falha,
+        };
+        var closingMessage = status switch
+        {
+            RunStatus.Done => "Execução concluída",
+            RunStatus.Aborted => "Execução abortada",
+            _ => "Execução com falha",
+        };
 
         var report = new ExecutionReport
         {
@@ -152,9 +167,15 @@ public sealed class RunManager(
             UserName = run.UserName,
             StartedAt = run.StartedAt,
             DurationSeconds = duration,
-            Status = status == RunStatus.Done ? ExecutionStatus.Concluido : ExecutionStatus.Falha,
+            Status = execStatus,
             PeakTemp = (int)Math.Round(run.PeakTemp),
             PeakCurrent = (decimal)Math.Round(run.PeakCurrent, 1),
+            // Only a real catalogued fault carries when/where it hit + the reason/code; a clean run or a
+            // user abort leaves these null (the simulator never produces a fault).
+            FaultAtT = fault?.AtT,
+            FaultAtTemp = fault?.AtTemp,
+            FailureReason = fault?.Message,
+            FaultTypeCode = fault?.Code,
             CreatedAt = endedAt,
             Points = BuildPoints(run),
             Trace = BuildTrace(run, duration),
@@ -165,25 +186,74 @@ public sealed class RunManager(
                 {
                     At = endedAt,
                     Kind = status == RunStatus.Done ? LogEventKind.Info : LogEventKind.Alerta,
-                    Message = status == RunStatus.Done ? "Execução concluída" : "Execução abortada",
+                    Message = closingMessage,
                     OrderIndex = 1,
                 },
             ],
         };
 
+        // One system-log line per finalize (Log do Sistema): Concluída→Info, Abortada→Aviso, Falha→Erro.
+        // Fully-qualified: this file imports Microsoft.Extensions.Logging, whose LogLevel would collide.
+        var logLevel = status switch
+        {
+            RunStatus.Done => ReflowOven.Domain.Enums.LogLevel.Info,
+            RunStatus.Aborted => ReflowOven.Domain.Enums.LogLevel.Aviso,
+            _ => ReflowOven.Domain.Enums.LogLevel.Erro,
+        };
+        var logEntry = new SystemLogEntry
+        {
+            At = endedAt,
+            Level = logLevel,
+            Message = $"{closingMessage}: '{run.ProgramName}' ({duration}s, pico {report.PeakTemp} °C)"
+                + (fault is { } ff ? $" — {ff.Code}" : ""),
+        };
+
         using (var scope = scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+
+            db.SystemLog.Add(logEntry); // saved in the same unit of work; Id is set after SaveChangesAsync.
+
+            // A real fault also produces an ErrorLogEntry so the report can deep-link to it; abort/clean don't.
+            if (fault is { } f)
+            {
+                var error = new ErrorLogEntry
+                {
+                    Id = Guid.NewGuid(),
+                    At = endedAt,
+                    FaultTypeCode = f.Code,
+                    Severity = f.Severity,
+                    Message = f.Message,
+                    UserId = run.UserId,
+                    UserName = run.UserName,
+                    ProgramId = run.ProgramId,
+                    ProgramName = run.ProgramName,
+                    OvenTemp = (int)Math.Round(run.Last?.Oven ?? 0),
+                    PcbTemp = (int)Math.Round(run.Last?.Board ?? 0),
+                    StartAt = run.StartedAt,
+                    EndAt = endedAt,
+                    InputVoltage = 127,
+                    OutputVoltage = (int)Math.Round(run.Last?.Voltage ?? 0),
+                    Snapshot = BuildTrace(run, duration),
+                    Events = [new LogEvent { At = endedAt, Kind = LogEventKind.Falha, Message = f.Message, OrderIndex = 0 }],
+                };
+                db.Errors.Add(error);
+                report.LinkedErrorId = error.Id;
+            }
+
             db.Executions.Add(report);
             db.Notifications.Add(new Notification
             {
                 Id = Guid.NewGuid(),
                 At = endedAt,
                 Kind = status == RunStatus.Done ? NotificationFeedKind.Info : NotificationFeedKind.Error,
-                Title = status == RunStatus.Done ? "Execução concluída" : "Execução abortada",
-                Message = status == RunStatus.Done
-                    ? $"'{run.ProgramName}' concluída em {duration}s (pico {report.PeakTemp} °C)."
-                    : $"'{run.ProgramName}' foi abortada após {duration}s.",
+                Title = closingMessage,
+                Message = status switch
+                {
+                    RunStatus.Done => $"'{run.ProgramName}' concluída em {duration}s (pico {report.PeakTemp} °C).",
+                    RunStatus.Aborted => $"'{run.ProgramName}' foi abortada após {duration}s.",
+                    _ => $"'{run.ProgramName}' falhou após {duration}s ({fault?.Code ?? "sem código"}).",
+                },
             });
             await db.SaveChangesAsync(ct);
         }
@@ -193,7 +263,13 @@ public sealed class RunManager(
             status, run.ProgramName, run.RunId, duration, report.PeakTemp);
         await sink.PublishStatusAsync(run.RunId, status);
         await sink.PublishCompletedAsync(run.RunId, report.Id);
+        // Push the system-log line live to the Log do Sistema hub (Id now populated by the save above).
+        await systemLog.PublishAsync(new ReflowOven.Application.Dtos.SystemLogDto(logEntry.Id, logEntry.At, logEntry.Level, logEntry.Message));
     }
+
+    /// <summary>A real (non-abort) fault descriptor that turns a finalize into a Falha + linked ErrorLogEntry.
+    /// No simulator path produces one today; the RS422 board would supply it when a catalogued fault fires.</summary>
+    private sealed record FaultInfo(string Code, ErrorSeverity Severity, string Message, int AtT, int AtTemp);
 
     private static List<ExecProfilePoint> BuildPoints(ActiveRun run)
     {

@@ -8,12 +8,12 @@ public sealed class RunsController(IRunManager runs, ICurrentUser current) : Con
     [HttpGet("status")]
     public ActionResult<RunStatusDto> Status() => Ok(runs.GetStatus());
 
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [Authorize(Policy = AuthPolicies.OperatorOrAdmin)]
     [HttpPost("start")]
     public Task<RunStatusDto> Start([FromBody] StartRunRequest req, CancellationToken ct)
         => runs.StartAsync(req.ProgramId, current.UserId, current.Name, ct);
 
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [Authorize(Policy = AuthPolicies.OperatorOrAdmin)]
     [HttpPost("stop")]
     public async Task<ActionResult<RunStatusDto>> Stop(CancellationToken ct) => Ok(await runs.StopAsync(ct));
 }

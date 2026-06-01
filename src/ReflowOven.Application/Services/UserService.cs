@@ -7,14 +7,20 @@ public sealed class UserService(
 {
     public async Task<IReadOnlyList<UserDto>> ListAsync(CancellationToken ct = default)
     {
-        var users = await db.Users.Include(u => u.ActivityStats).OrderBy(u => u.Name).ToListAsync(ct);
+        // The dev Master is hidden from the Usuários grid (the front's UserDto.type is only Admin|Regular).
+        var users = await db.Users.Include(u => u.ActivityStats)
+            .Where(u => u.Type != UserType.Master)
+            .OrderBy(u => u.Name).ToListAsync(ct);
         return users.Select(Map).ToList();
     }
 
     public async Task<UserDto> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var user = await db.Users.Include(u => u.ActivityStats).FirstOrDefaultAsync(u => u.Id == id, ct)
-            ?? throw new NotFoundException("Usuário não encontrado.");
+        var user = await db.Users.Include(u => u.ActivityStats).FirstOrDefaultAsync(u => u.Id == id, ct);
+        // The dev Master is invisible to the Usuários screen — treat it as not found here too (matches ListAsync),
+        // so its name/email/Type=Master never reach a UserDto (whose front contract is only Admin|Regular).
+        if (user is null || user.Type == UserType.Master)
+            throw new NotFoundException("Usuário não encontrado.");
         return Map(user);
     }
 
@@ -24,6 +30,10 @@ public sealed class UserService(
         Validation.ValidateUserName(name);
         var email = (req.Email ?? "").Trim();
         Validation.ValidateEmail(email);
+
+        // The dev Master is seeded, not creatable via the API — block self-promotion via "type":"Master".
+        if (req.Type == UserType.Master)
+            throw new ValidationAppException("Tipo de usuário inválido.");
 
         var lower = name.ToLowerInvariant();
         if (await db.Users.AnyAsync(u => u.Name.ToLower() == lower, ct))
@@ -68,6 +78,10 @@ public sealed class UserService(
     {
         var user = await db.Users.Include(u => u.ActivityStats).FirstOrDefaultAsync(u => u.Id == id, ct)
             ?? throw new NotFoundException("Usuário não encontrado.");
+
+        // The dev Master is immutable through this screen, and no one may be promoted to Master here.
+        if (user.Type == UserType.Master || req.Type == UserType.Master)
+            throw new ForbiddenAppException("O usuário Master não pode ser alterado por esta tela.");
 
         var email = (req.Email ?? "").Trim();
         Validation.ValidateEmail(email);
@@ -124,6 +138,10 @@ public sealed class UserService(
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct)
             ?? throw new NotFoundException("Usuário não encontrado.");
+
+        // The dev Master is permanent — never removable through the Usuários screen.
+        if (user.Type == UserType.Master)
+            throw new ForbiddenAppException("O usuário Master não pode ser removido.");
 
         if (await IsLastActiveAdminAsync(id, ct))
             throw new ConflictException("Não é possível remover o único administrador ativo.");

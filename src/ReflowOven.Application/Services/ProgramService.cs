@@ -119,23 +119,30 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Toggle the program's favorite flag for the user; returns the new state.</summary>
-    public async Task<bool> ToggleFavoriteAsync(string id, Guid userId, CancellationToken ct = default)
+    /// <summary>
+    /// Set or toggle the program's favorite flag for the user; returns the new state. When
+    /// <paramref name="desired"/> is given it is an idempotent set (no-op if already in that state);
+    /// when null it toggles the current state.
+    /// </summary>
+    public async Task<bool> ToggleFavoriteAsync(string id, Guid userId, bool? desired = null, CancellationToken ct = default)
     {
         if (!await db.Programs.AnyAsync(p => p.Id == id, ct))
             throw new NotFoundException("Programa não encontrado.");
 
         var fav = await db.Favorites.FirstOrDefaultAsync(f => f.UserId == userId && f.ProgramId == id, ct);
-        if (fav is null)
-        {
-            db.Favorites.Add(new FavoriteProgram { UserId = userId, ProgramId = id });
-            await db.SaveChangesAsync(ct);
-            return true;
-        }
+        var isFav = fav is not null;
+        var target = desired ?? !isFav;
 
-        db.Favorites.Remove(fav);
+        if (target == isFav)
+            return isFav; // idempotent no-op
+
+        if (target)
+            db.Favorites.Add(new FavoriteProgram { UserId = userId, ProgramId = id });
+        else
+            db.Favorites.Remove(fav!);
+
         await db.SaveChangesAsync(ct);
-        return false;
+        return target;
     }
 
     private static (string name, string? description, List<ProfileSegment>? segments, List<ProfilePoint> profile) Validate(SaveProgramRequest req)

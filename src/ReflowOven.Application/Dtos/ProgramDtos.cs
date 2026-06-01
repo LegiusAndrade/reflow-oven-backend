@@ -39,3 +39,9 @@ public sealed record ProgramListQuery(
     ProgramSort Sort = ProgramSort.Default,
     int Page = 1,
     int PageSize = 12);
+
+/// <summary>
+/// Optional body for POST /api/programs/{id}/favorite. When <c>Favorite</c> is provided the call is
+/// idempotent (set to that exact state); when the body is absent/null the endpoint toggles.
+/// </summary>
+public sealed record SetFavoriteRequest(bool? Favorite);

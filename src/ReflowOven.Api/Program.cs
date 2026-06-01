@@ -45,6 +45,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddSingleton<ITelemetrySink, SignalRTelemetrySink>();
+builder.Services.AddSingleton<ISystemLogSink, SignalRSystemLogSink>();
 
 // --- JSON (pt-BR enum strings, omit nulls) ----------------------------------------------
 builder.Services.AddControllers().AddJsonOptions(o =>
@@ -67,6 +68,15 @@ if (!builder.Environment.IsDevelopment() &&
 {
     throw new InvalidOperationException(
         "Jwt:SigningKey ausente ou padrão. Configure um segredo forte via Jwt__SigningKey (env) ou user-secrets fora de Development.");
+}
+
+// The dev Master password is a placeholder like the JWT key; never ship it outside Development.
+const string devMasterPasswordPlaceholder = "pandewilly";
+if (!builder.Environment.IsDevelopment() &&
+    string.Equals(builder.Configuration["Master:Password"], devMasterPasswordPlaceholder, StringComparison.Ordinal))
+{
+    throw new InvalidOperationException(
+        "Master:Password ainda é o padrão de dev. Defina um segredo real via Master__Password (env) fora de Development.");
 }
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -99,7 +109,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 // --- AuthZ (authenticated by default; Admin & Calibration policies) ---------------------
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
-    .AddPolicy(AuthPolicies.AdminOnly, p => p.RequireRole(nameof(UserType.Admin)))
+    .AddPolicy(AuthPolicies.AdminOnly, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Master)))
+    .AddPolicy(AuthPolicies.OperatorOrAdmin, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Regular), nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.CalibrationOnly, p => p.RequireClaim("calibration", "true"));
 
 // --- CORS for the Next.js frontend ------------------------------------------------------
@@ -160,7 +171,7 @@ using (var scope = app.Services.CreateScope())
 
     // Migrate (creating the DB + logging a Warning when it doesn't exist yet on a fresh PC), then seed.
     await ReflowOven.Api.StartupDiagnostics.MigrateAndLogAsync(db, app.Logger);
-    await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock);
+    await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock, sp.GetRequiredService<IMasterCredentials>());
     if (app.Configuration.GetValue<bool>("Seed:Demo"))
         await DbSeeder.SeedDemoAsync(db, clock);
 
@@ -199,6 +210,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<RunTelemetryHub>("/hubs/telemetry");
 app.MapHub<DiagnosticsHub>("/hubs/diagnostics");
+app.MapHub<SystemLogHub>("/hubs/systemlog");
 app.MapHealthChecks("/health").AllowAnonymous();
 
 app.Run();

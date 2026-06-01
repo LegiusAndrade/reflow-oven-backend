@@ -92,6 +92,10 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(x => x.UserName).HasMaxLength(40);
             e.Property(x => x.ProgramId).HasMaxLength(64);
             e.Property(x => x.PeakCurrent).HasPrecision(5, 1);
+            e.Property(x => x.FaultTypeCode).HasMaxLength(10);
+            e.Property(x => x.FailureReason).HasMaxLength(200);
+            // LinkedErrorId is a loose reference (no FK) so the Errors↔FaultType/LogEvents delete graph stays simple.
+            e.HasIndex(x => x.LinkedErrorId);
             e.OwnsMany(x => x.Points, o => o.ToJson());
             e.OwnsMany(x => x.Comparison, o => o.ToJson());
             e.OwnsOne(x => x.Trace, s =>

@@ -12,6 +12,7 @@ public enum UserType
 {
     Admin,
     Regular,
+    Master, // dev superuser: inherits Admin + unlocks the Diagnóstico → Log tab (no JsonStringEnumMemberName → wire literal "Master")
 }
 
 public enum UserStatus
@@ -60,6 +61,7 @@ public enum ExecutionStatus
 {
     [JsonStringEnumMemberName("Concluído")] Concluido,
     Falha,
+    Abortado, // manual stop; no accent so the response wire AND the ?status= filter literal are both "Abortado"
 }
 
 public enum LogEventKind

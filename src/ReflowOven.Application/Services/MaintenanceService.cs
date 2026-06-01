@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
-public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system)
+public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master)
 {
     /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
     /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
@@ -58,7 +58,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         return new CleanupResultDto(deleted);
     }
 
-    /// <summary>Wipe history + users + programs, then reseed one admin + the factory program + defaults.</summary>
+    /// <summary>Wipe history + users + programs, then reseed one admin + the dev Master + the factory program + defaults.</summary>
     public async Task FactoryResetAsync(string confirm, CancellationToken ct = default)
     {
         if (confirm != "RESETAR")
@@ -91,6 +91,9 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             Status = admin.Status,
             CreatedAt = clock.UtcNow,
         });
+
+        // The dev Master superuser survives the reset (it was wiped with the rest above, so recreate it).
+        db.Users.Add(Defaults.BuildMasterUser(master, hasher, clock));
 
         // Settings & calibration back to defaults.
         await db.NotificationSettings.ExecuteDeleteAsync(ct);

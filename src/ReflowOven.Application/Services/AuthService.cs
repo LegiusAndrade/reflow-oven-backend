@@ -52,31 +52,47 @@ public sealed class AuthService(
         }
 
         var now = clock.UtcNow;
-        user.LastLogin = now;
-        user.LoginCount++;
 
-        // Soft password-change policy: if still on the system-issued password past the deadline,
-        // resend the reminder (at most once a day) but still allow the login.
-        var remind = false;
-        var due = default(DateTimeOffset);
+        // Hard password-change policy: if the user is still on the system-issued password and the deadline
+        // has passed, the provisional password is rejected. We generate a fresh one, email it (best-effort,
+        // throttled to once a day so a retry storm can't spam), and refuse the login until they use the new
+        // password. The deadline is anchored on PasswordIssuedAt (set on create/reissue).
         if (user.MustChangePassword && user.PasswordIssuedAt is { } issued)
         {
-            due = issued.AddDays(DomainConstants.PasswordChangeWithinDays);
-            if (now >= due && (user.LastPasswordReminderAt is null || user.LastPasswordReminderAt < now.AddDays(-1)))
+            var deadline = issued.AddDays(DomainConstants.PasswordChangeWithinDays);
+            if (now > deadline)
             {
-                remind = true;
-                user.LastPasswordReminderAt = now;
+                var throttled = user.LastPasswordReminderAt is { } last && last > now.AddDays(-1);
+                if (!throttled)
+                {
+                    // Rotate the provisional password and email the new one (only when not throttled, so we
+                    // never issue a password the user wasn't told about).
+                    var newTemp = PasswordGenerator.Generate();
+                    user.PasswordHash = hasher.Hash(newTemp);
+                    user.PasswordIssuedAt = now;
+                    user.MustChangePassword = true;
+                    user.LastPasswordReminderAt = now;
+                    var changeBy = now.AddDays(DomainConstants.PasswordChangeWithinDays);
+                    await db.SaveChangesAsync(ct);
+
+                    logger.LogWarning("Senha provisória de '{User}' expirada; nova senha gerada e enviada.", user.Name);
+                    try { await email.SendNewUserAsync(user.Email, user.Name, newTemp, changeBy, ct); }
+                    catch (Exception ex) { logger.LogError(ex, "Falha ao enviar a nova senha provisória para '{Email}'.", user.Email); }
+                }
+                else
+                {
+                    logger.LogWarning("Senha provisória de '{User}' expirada; reenvio ainda em janela de throttle.", user.Name);
+                }
+
+                return LoginResult.Fail("Sua senha provisória expirou. Enviamos uma nova senha para o seu e-mail.");
             }
         }
+
+        user.LastLogin = now;
+        user.LoginCount++;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Login OK: '{User}' ({Type}).", user.Name, user.Type);
-        if (remind)
-        {
-            logger.LogWarning("Senha de '{User}' vencida desde {Due:dd/MM/yyyy}; reenviando lembrete.", user.Name, due);
-            try { await email.SendPasswordChangeReminderAsync(user.Email, user.Name, due, ct); }
-            catch (Exception ex) { logger.LogError(ex, "Falha ao reenviar o lembrete de senha para '{Email}'.", user.Email); }
-        }
 
         var tok = jwt.CreateForUser(user);
         var prefs = UserService.MapPrefs(user.Preferences);
@@ -99,9 +115,13 @@ public sealed class AuthService(
         }
         Validation.ValidatePassword(req.NewPassword ?? "");
 
+        var now = clock.UtcNow;
         user.PasswordHash = hasher.Hash(req.NewPassword!);
         user.MustChangePassword = false;
-        user.PasswordChangedAt = clock.UtcNow;
+        user.PasswordChangedAt = now;
+        // The user now owns their password — clear the issued-password deadline anchor + reminder throttle.
+        user.PasswordIssuedAt = null;
+        user.LastPasswordReminderAt = null;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Senha alterada por '{User}'.", user.Name);

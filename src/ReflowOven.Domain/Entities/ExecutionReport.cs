@@ -29,6 +29,14 @@ public class ExecutionReport
     public int? FaultAtT { get; set; }
     public int? FaultAtTemp { get; set; }
 
+    /// <summary>Set only on a real (non-abort) fault: the human-readable reason and the catalog code (E-1xx).</summary>
+    public string? FailureReason { get; set; }
+    public string? FaultTypeCode { get; set; }
+
+    /// <summary>Soft reference (no FK) to the <see cref="ErrorLogEntry"/> raised for this fault, for the
+    /// "Ver no Relatório de Erros" deep-link. Null for clean or user-aborted runs.</summary>
+    public Guid? LinkedErrorId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>Programmed + measured curve points (Kind discriminates). Stored as jsonb.</summary>

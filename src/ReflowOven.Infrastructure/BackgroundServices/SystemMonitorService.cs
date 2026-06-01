@@ -17,6 +17,7 @@ public sealed class SystemMonitorService(
     IServiceScopeFactory scopeFactory,
     IClock clock,
     IEmailSender email,
+    ISystemLogSink systemLog,
     IOptions<SystemOptions> options,
     ILogger<SystemMonitorService> logger) : BackgroundService
 {
@@ -118,17 +119,32 @@ public sealed class SystemMonitorService(
 
     private async Task RaiseAsync(NotificationFeedKind kind, string title, string message, CancellationToken ct)
     {
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-        db.Notifications.Add(new Notification
+        var at = clock.UtcNow;
+        // Mirror the notification onto the Log do Sistema: an update is informational, anything else a warning.
+        var logEntry = new SystemLogEntry
         {
-            Id = Guid.NewGuid(),
-            At = clock.UtcNow,
-            Kind = kind,
-            Title = title,
-            Message = message,
-        });
-        await db.SaveChangesAsync(ct);
+            At = at,
+            // Fully-qualified: this file imports Microsoft.Extensions.Logging, whose LogLevel would collide.
+            Level = kind == NotificationFeedKind.Update ? ReflowOven.Domain.Enums.LogLevel.Info : ReflowOven.Domain.Enums.LogLevel.Aviso,
+            Message = $"{title}: {message}",
+        };
+
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            db.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                At = at,
+                Kind = kind,
+                Title = title,
+                Message = message,
+            });
+            db.SystemLog.Add(logEntry); // same unit of work; Id populated by the save below.
+            await db.SaveChangesAsync(ct);
+        }
+
         logger.LogInformation("Notificação gerada: {Kind} — {Title}", kind, title);
+        await systemLog.PublishAsync(new ReflowOven.Application.Dtos.SystemLogDto(logEntry.Id, logEntry.At, logEntry.Level, logEntry.Message));
     }
 }
