@@ -47,7 +47,27 @@ Health-check em `/health`. Todos os eventos (login/logout, alterações, execuç
 requisição HTTP são logados no **console** via **Serilog**.
 
 **Login de desenvolvimento:** qualquer usuário do seed (ex.: `lucas.silva`, admin) com a senha
-`reflow1234`, ou o login técnico oculto `calibracao` / `calibra`.
+`reflow1234`, ou o login técnico oculto `calibracao` / `calibra`. O superusuário **Master** (dev) é
+`dev.pandewilly` / `pandewilly` — herda todos os acessos de Admin e habilita a aba *Diagnóstico → Log*
+(não aparece na tela de Usuários).
+
+## 🔐 Segredos em produção
+
+Os valores em `appsettings.json` (senha do banco, `Jwt:SigningKey` com `dev-only-change-me…`, e as senhas
+do técnico e do Master) são **placeholders de desenvolvimento**. Em produção, sobreponha-os por variáveis de
+ambiente (o .NET mapeia `Section__Key` → `Section:Key`). Copie **[`.env.example`](.env.example)** para `.env`
+(que é gitignored) e preencha com segredos reais, ou exporte-os no seu gerenciador de serviço.
+
+O `Program.cs` **falha ao subir** (fail-fast) fora de `Development` se qualquer um destes continuar no padrão:
+
+| Variável | Placeholder de dev | Como gerar |
+| --- | --- | --- |
+| `Jwt__SigningKey` | `dev-only-change-me-please-use-32-bytes-minimum!` | `openssl rand -base64 32` |
+| `Master__Password` | `pandewilly` | `openssl rand -base64 24` |
+
+Defina também `ASPNETCORE_ENVIRONMENT=Production` (em `Development` os fail-fast são pulados). Para o e-mail
+real (onboarding / recuperação / aviso de senha vencida), configure `Email__Mode=Smtp` + credenciais — veja o
+`.env.example` para a lista completa.
 
 ## 🛠️ Solução de problemas (perrengues comuns)
 
