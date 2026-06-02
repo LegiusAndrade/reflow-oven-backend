@@ -1,5 +1,43 @@
 # TODO — bugs e melhorias
 
+## ⏭️ Próximas tarefas (backend) — para a próxima sessão (registrado 2026-06-01)
+
+Levantadas ao fim da sessão de 2026-06-01. **Recomendação: começar pela #1** (bug confirmado).
+
+1. **⭐ Comparativo do Perfil em runs ao vivo** — *bug confirmado, alto valor.* `RunManager.FinalizeAsync`
+   monta `Trace`/`Points`/`Events`, mas **não** preenche `Comparison` → a tabela "Comparativo do Perfil"
+   fica vazia em execução real (só os seeds demo têm; é a nota do front "comparison vazio em TODA execução").
+   Implementar: comparar o perfil programado × a trace medida **por estágio**
+   (`tempProg`/`tempReal`/`timeProgSeconds`/`timeRealSeconds`/`stageIndex`), como `DbSeeder.Demo.BuildExecution`
+   já faz. Escopo médio.
+
+2. **Seed limpo em produção** — *segurança, escopo pequeno.* `operador1`/`operador2` (demo, senha
+   `reflow1234`) ainda semeiam em **produção** (o seed de usuários roda no `SeedAsync`, não só no demo).
+   Gatear os usuários/dados demo atrás de `Seed:Demo` (dev-only) → prod só ganha Admin/Regular/Master da
+   config. Opcional: fail-fast se `Admin__Password`/`Regular__Password` ficarem no default fora de Development
+   (igual ao Master/Jwt em `Program.cs`).
+
+3. **Notificações em tempo real (SignalR)** — o feed do sininho é polling; adicionar um hub de push
+   espelhando o `/hubs/systemlog` (ver `ISystemLogSink`/`SignalRSystemLogSink`/`SystemLogHub`). Escopo médio.
+
+4. **Eventos → notificações + `kind`** — definir/implementar quais eventos geram entrada no feed e o `kind`
+   (`info`/`error`/`update`): execução **abortada** → warning, **falha da placa**, **OTA** disponível.
+   Escopo pequeno.
+
+5. **Verificar "Limpeza mock-stage"** — a nota de 2026-06-01 (abaixo) diz que a Limpeza da Manutenção é mock,
+   mas o `MaintenanceService.CleanupAsync` já usa `ExecuteDelete` (deleção real). Confirmar e fechar a nota.
+
+6. **RS422 / hardware real + `LinuxSystemController`** — *grande, futuro.* Protocolo STM32 (RS422) e o SO do
+   OrangePi (hoje `SimulatedPowerBoard` / `SimulatedSystemController`).
+
+**Front (time do front):** tela **"Lixeira do Master"** (ver/restaurar/expurgar via `…/deleted` · `…/restore`
+· `…/purge`, MasterOnly) + remover a categoria "Alterações" da Limpeza — **backend já pronto**.
+
+**Ops / Lucas:** `git push` da `develop` (commits locais acumulados); senha de app do Gmail no `.env`;
+segredos reais de prod (Jwt/Master/Admin/Regular) + aplicar migrations no deploy.
+
+---
+
 ## ✅ Resolvidos
 
 ### 1. Biblioteca de logger — "todo log possível no console"
@@ -701,3 +739,44 @@ só o **Master** vê uma "Lixeira" (aba própria em Configurações, só-Master)
 **Front (feito agora):** removi "Registro de alterações" da Limpeza + adicionei os métodos no `api.ts`
 (`listDeleted*`/`restore*`/`purge*`). **Falta** a tela Lixeira — só monto quando os endpoints existirem
 (pra não dar 404 nem poluir o terminal). Local: aba própria de Configurações, só-Master.
+
+## 🔧 NOTIFICAÇÕES: quais eventos viram notificação + `kind` (2026-06-01)
+
+Regra (alinhada com o dono): o **sino** é p/ eventos **assíncronos / que afetam o operador** — **não**
+p/ ações que o próprio usuário acabou de fazer (essas já são **toast** + **Log de Alterações**). Evento → `kind`:
+
+| Evento | `kind` |
+|---|---|
+| Execução **concluída** | `info` |
+| Execução **abortada** | `warning` (âmbar — hoje vem como `error`; **trocar p/ `warning`**) |
+| Execução com **falha** | `error` |
+| **Falha/alerta da placa** (sobretemperatura, termopar aberto, sobrecorrente, tensão fora da faixa, ventoinha parada) | `error` (já vão pro relatório de Erros; **acender o sino também**) |
+| **Atualização disponível (OTA)** | `update` |
+
+**NÃO** viram notificação (já cobertos por toast + Log de Alterações): criar/editar/remover **programa**,
+criar/remover **usuário**, mudar **configuração**.
+
+Novo tipo **`warning`** no `NotificationDto.kind` → `"info" | "error" | "warning" | "update"`. O **front já
+trata** `warning` (feed em âmbar com ícone de aviso + toast âmbar). O backend precisa:
+1. Emitir `warning` (em vez de `error`) na notificação de **execução abortada**.
+2. Criar notificação (`error`) para as **falhas/alertas da placa** (mesmos eventos do relatório de Erros).
+3. (Opcional) Notificação `update` quando houver **atualização OTA** disponível.
+
+## 🔧 LIMPEZA (Manutenção) ainda é mock-stage — migrar p/ deleção real (2026-06-01)
+
+A tela "Limpeza do banco" hoje é **half-mock**: as **contagens** por categoria vêm de arrays mock no front
+(`MOCK_EXECUTIONS`/`MOCK_CHANGES`/`MOCK_ERRORS`/`MOCK_LOGS` `.length`), os **tamanhos** são estimativas
+(`BYTES_PER_RECORD`), e "limpar" seta uma **flag local** (`cleanupStore`) que esconde os registros nas telas
+(Relatórios, modal de Log) — não apaga de verdade. `POST /api/maintenance/cleanup` é chamado, mas o efeito
+real não é confirmado, e `GET /api/maintenance/overview` hoje volta vazio.
+
+Pra esses mocks saírem do front e a Limpeza virar real, o backend precisa:
+1. `GET /api/maintenance/overview` → contagens (idealmente bytes) reais por categoria:
+   `{ execucoes, alteracoes, falhas, logs, inativos }` (ou reusar o `total` dos endpoints de relatório).
+2. `POST /api/maintenance/cleanup` apagar **de verdade** as categorias escolhidas (server-side).
+
+Aí o front troca as contagens mock por reais, dropa a flag `cleanupStore` (passa a re-buscar após limpar) e
+remove `MOCK_EXECUTIONS`/`MOCK_CHANGES`/`MOCK_ERRORS`/`MOCK_LOGS`.
+
+(Obs.: `MOCK_PROGRAMS` já era órfão → removido; `programs.ts` agora é só tipos. `MOCK_READINGS` é a leitura
+inicial/placeholder do BottomBar antes do hub de diagnóstico — fica até decidirmos zerar o estado inicial.)
