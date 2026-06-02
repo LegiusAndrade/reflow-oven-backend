@@ -56,7 +56,8 @@ requisição HTTP são logados no **console** via **Serilog**.
 Os valores em `appsettings.json` (senha do banco, `Jwt:SigningKey` com `dev-only-change-me…`, e as senhas
 do técnico e do Master) são **placeholders de desenvolvimento**. Em produção, sobreponha-os por variáveis de
 ambiente (o .NET mapeia `Section__Key` → `Section:Key`). Copie **[`.env.example`](.env.example)** para `.env`
-(que é gitignored) e preencha com segredos reais, ou exporte-os no seu gerenciador de serviço.
+(gitignored) e preencha com segredos reais — o `Program.cs` **carrega o `.env` automaticamente** no startup
+(uma variável de ambiente real tem prioridade sobre o arquivo). Como alternativa, exporte-os no seu gerenciador de serviço.
 
 O `Program.cs` **falha ao subir** (fail-fast) fora de `Development` se qualquer um destes continuar no padrão:
 

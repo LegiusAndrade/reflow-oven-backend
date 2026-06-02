@@ -49,14 +49,23 @@ public static partial class DbSeeder
             }
         }
 
-        // The single dev Master superuser. Guarded independently of the bulk-users seed above, so it also
-        // lands on an already-seeded DB (the bulk guard only fires on a fresh one). Idempotent by type.
-        if (!await db.Users.AnyAsync(u => u.Type == UserType.Master, ct))
+        // The single dev Master superuser — a config-driven account. Create it if missing; otherwise keep its
+        // credentials in sync with config/env on each startup, so changing Master__* (e.g. via .env) and
+        // restarting actually applies (the password lives in config/env, it is not managed in the DB).
+        Validation.ValidateUserName(master.Username);
+        Validation.ValidateEmail(master.Email);
+        var existingMaster = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Type == UserType.Master, ct);
+        if (existingMaster is null)
         {
-            var m = Defaults.BuildMasterUser(master, hasher, clock);
-            Validation.ValidateUserName(m.Name);
-            Validation.ValidateEmail(m.Email);
-            db.Users.Add(m);
+            db.Users.Add(Defaults.BuildMasterUser(master, hasher, clock));
+        }
+        else
+        {
+            existingMaster.Name = master.Username;
+            existingMaster.Email = master.Email;
+            // Re-hash only when the configured password actually changed (avoids a BCrypt hash every startup).
+            if (!hasher.Verify(master.Password, existingMaster.PasswordHash))
+                existingMaster.PasswordHash = hasher.Hash(master.Password);
         }
 
         await db.SaveChangesAsync(ct);

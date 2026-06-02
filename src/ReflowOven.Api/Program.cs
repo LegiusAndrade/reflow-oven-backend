@@ -18,6 +18,25 @@ using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
+// Load a .env file (if present) into the process environment BEFORE configuration is read — .NET has no
+// native .env provider. Walk up from the working directory to the repo root; a real env var wins over the file.
+for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir is not null; dir = dir.Parent)
+{
+    var envPath = Path.Combine(dir.FullName, ".env");
+    if (!File.Exists(envPath)) continue;
+    foreach (var line in File.ReadAllLines(envPath))
+    {
+        var entry = line.Trim();
+        if (entry.Length == 0 || entry[0] == '#') continue;
+        var eq = entry.IndexOf('=');
+        if (eq <= 0) continue;
+        var key = entry[..eq].Trim();
+        if (Environment.GetEnvironmentVariable(key) is not null) continue; // a real env var wins over the file
+        Environment.SetEnvironmentVariable(key, entry[(eq + 1)..].Trim());
+    }
+    break; // first .env found (nearest ancestor) wins
+}
+
 // Bootstrap logger: captures anything thrown during startup (config, DI, migrations) on the console.
 // It is replaced by the fully-configured logger once the host is built (see UseSerilog below).
 Log.Logger = new LoggerConfiguration()
