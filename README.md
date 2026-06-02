@@ -66,8 +66,10 @@ O `Program.cs` **falha ao subir** (fail-fast) fora de `Development` se qualquer 
 | `Master__Password` | `pandewilly` | `openssl rand -base64 24` |
 
 Defina também `ASPNETCORE_ENVIRONMENT=Production` (em `Development` os fail-fast são pulados). Para o e-mail
-real (onboarding / recuperação / aviso de senha vencida), configure `Email__Mode=Smtp` + credenciais — veja o
-`.env.example` para a lista completa.
+real (onboarding / recuperação / aviso de senha vencida), configure `Email__Mode=Smtp` + credenciais — há um
+**passo a passo (inclusive Gmail)** em
+[`docs/GUIA-DO-PROJETO.md`](./docs/GUIA-DO-PROJETO.md#7-configurar-o-e-mail-smtp), e a lista completa de
+variáveis no `.env.example`.
 
 ## 🛠️ Solução de problemas (perrengues comuns)
 
@@ -94,7 +96,7 @@ SQL
 
 > Se o papel já existir, troque a 1ª linha por `ALTER ROLE reflow WITH LOGIN PASSWORD 'reflow';`. Se o
 > banco já existir, pule o `CREATE DATABASE`. Usuário/senha/banco devem bater com a _connection string_
-> em `appsettings.json`. Detalhes em [`docs/GUIA-DO-PROJETO.md`](./docs/GUIA-DO-PROJETO.md#9-solução-de-problemas).
+> em `appsettings.json`. Detalhes em [`docs/GUIA-DO-PROJETO.md`](./docs/GUIA-DO-PROJETO.md#10-solução-de-problemas).
 
 ## 📜 Comandos
 

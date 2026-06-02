@@ -11,9 +11,10 @@ no projeto, por que existe, e como **rodar/debugar no VSCode**. Leitura recomend
 4. [As 4 camadas, pasta por pasta, arquivo por arquivo](#4-as-4-camadas-arquivo-por-arquivo)
 5. [Como tudo se conecta (fluxos de ponta a ponta)](#5-fluxos-de-ponta-a-ponta)
 6. [Como debugar no VSCode](#6-como-debugar-no-vscode)
-7. [Comandos do dia a dia](#7-comandos-do-dia-a-dia)
-8. [Glossário](#8-glossário)
-9. [Solução de problemas (os perrengues que passamos)](#9-solução-de-problemas)
+7. [Configurar o e-mail (SMTP)](#7-configurar-o-e-mail-smtp)
+8. [Comandos do dia a dia](#8-comandos-do-dia-a-dia)
+9. [Glossário](#9-glossário)
+10. [Solução de problemas (os perrengues que passamos)](#10-solução-de-problemas)
 
 ---
 
@@ -190,7 +191,7 @@ services:
 | `Auth/TechnicianCredentials.cs` | Valida o login técnico oculto contra a config. |
 | `Run/RunManager.cs` | **O cérebro da execução**: guarda a execução ativa, lê a placa a cada 1s, calcula o setpoint, empurra a telemetria e, ao terminar, salva o `ExecutionReport`. |
 | `BackgroundServices/RunControlLoopService.cs` | Um serviço que roda em segundo plano e "tica" o `RunManager` a 1 Hz (e publica leituras quando ocioso). |
-| `Email/StubEmailSender.cs` | "Envia" o e-mail de reset escrevendo no log (troque por SMTP real). |
+| `Email/StubEmailSender.cs` · `SmtpEmailSender.cs` · `EmailOptions.cs` | Envio de e-mail (boas-vindas, recuperação de senha, avisos). O **stub** só escreve no log (padrão de dev); o **SMTP** (MailKit) envia de verdade. Escolha com `Email:Mode` — passo a passo na [seção 7](#7-configurar-o-e-mail-smtp). |
 | `Time/SystemClock.cs` | Implementação real de `IClock`. |
 | `DependencyInjection.cs` | `AddInfrastructure()` — registra banco, JWT, placa, run manager e o loop. |
 
@@ -277,7 +278,95 @@ services:
 
 ---
 
-## 7. Comandos do dia a dia
+## 7. Configurar o e-mail (SMTP)
+
+O backend manda e-mails (todos em pt-BR) em **quatro** situações:
+
+| Quando | E-mail enviado | De onde sai no código |
+| --- | --- | --- |
+| Um **novo usuário** é criado | "Bem-vindo… sua senha de acesso", com a **senha provisória** e o prazo para trocá-la | `UserService.CreateAsync` |
+| A senha provisória **vence** e o usuário tenta logar | Uma **nova** senha provisória é gerada e reenviada (o login é recusado pedindo para consultar o e-mail) | `AuthService.LoginAsync` |
+| O usuário pede **recuperação de senha** | "Recuperação de senha", com um código que **expira em 1 hora** | `AuthService` (`forgot-password`) |
+| O **disco fica baixo** no dispositivo | "Espaço em disco crítico", para todos os admins **ativos** | `SystemMonitorService` |
+
+### Os dois modos: `Stub` e `Smtp`
+
+O envio é abstraído pela interface `IEmailSender`. **Qual** implementação roda depende de **`Email:Mode`**:
+
+| `Email:Mode` | Implementação | O que faz |
+| --- | --- | --- |
+| `Stub` (**padrão**) | `StubEmailSender` | **Não envia nada** — só escreve no log do console, ex.: `[stub-email] Novo usuário lucas <…>: senha 'Xy3k…'`. Ótimo em desenvolvimento: você lê a senha provisória direto no log, sem precisar de servidor de e-mail. |
+| `Smtp` | `SmtpEmailSender` | **Envia de verdade**, via **MailKit** (SMTP). É o que você usa em produção. |
+
+> A troca acontece em `Infrastructure/DependencyInjection.cs`: se `Email:Mode` for `Smtp` (sem diferenciar
+> maiúsculas) registra o `SmtpEmailSender`; senão, o `StubEmailSender`. Em **qualquer** modo, uma falha de
+> envio **nunca** quebra a operação — o usuário é criado mesmo se o e-mail falhar (o erro vai só para o log).
+
+### A seção `Email` do `appsettings.json`
+
+```jsonc
+"Email": {
+  "Mode": "Stub",             // troque para "Smtp" para enviar de verdade
+  "FromName": "Reflow Oven",  // nome que aparece no campo "De:"
+  "Smtp": {
+    "Host": "smtp.gmail.com", // servidor SMTP
+    "Port": 587,              // porta de submissão (STARTTLS)
+    "User": "",               // usuário SMTP (no Gmail, o endereço completo); vazio = sem autenticação
+    "Password": "",           // senha SMTP — NÃO comite (veja "Onde guardar a senha" abaixo)
+    "From": "",               // remetente; se vazio, usa o "User"
+    "UseStartTls": true       // STARTTLS na 587; false = negociar automaticamente (ex.: 465/SSL)
+  }
+}
+```
+
+### Passo a passo com Gmail (o padrão)
+
+Os valores padrão já apontam para o Gmail. Para enviar por uma conta Google:
+
+1. **Ative a verificação em duas etapas** na conta (senhas de app exigem 2FA).
+2. Gere uma **Senha de app** em <https://myaccount.google.com/apppasswords> — são **16 caracteres**
+   (não é a senha normal da conta).
+3. Preencha:
+   - `User` = seu endereço Gmail completo (ex.: `voce@gmail.com`)
+   - `Password` = a **senha de app** de 16 caracteres
+   - `From` = deixe vazio (usa o `User`) ou um endereço seu
+   - `Host` / `Port` / `UseStartTls` = mantenha `smtp.gmail.com` / `587` / `true`
+4. Troque `Mode` para `Smtp` e reinicie a API.
+
+> Outros provedores (Outlook, SendGrid, SMTP corporativo) funcionam igual: ajuste `Host`/`Port` e as
+> credenciais. Para porta **465** (SSL implícito), deixe `"UseStartTls": false`.
+
+### Onde guardar a senha (NÃO no git)
+
+A senha SMTP é um **segredo** — nunca a deixe no `appsettings.json` versionado. Sobrescreva por **variável
+de ambiente** (o .NET mapeia `Seção__Chave` → `Seção:Chave`):
+
+```bash
+export Email__Mode=Smtp
+export Email__Smtp__User="voce@gmail.com"
+export Email__Smtp__Password="abcd efgh ijkl mnop"   # a senha de app de 16 caracteres
+export Email__Smtp__From="voce@gmail.com"
+```
+
+Em produção, o caminho recomendado é copiar **[`.env.example`](../.env.example)** para `.env` (que é
+**gitignored**) e preencher os campos `Email__*` ali — veja a seção "🔐 Segredos em produção" do
+[`README.md`](../README.md).
+
+> Em desenvolvimento dá para usar o cofre de segredos do .NET, mas ele **não vem configurado** neste
+> projeto: rode `dotnet user-secrets init -p src/ReflowOven.Api` **uma vez** antes de
+> `dotnet user-secrets set "Email:Smtp:Password" "…" -p src/ReflowOven.Api`. Para o dia a dia, o modo
+> `Stub` (que loga a senha) costuma bastar.
+
+### Como testar
+
+- **No modo `Stub`** (dev): crie um usuário (tela Usuários ou `POST /api/users`) e veja no **console** a
+  linha `[stub-email] Novo usuário …` com a senha provisória — é assim que você "recebe" o e-mail sem SMTP.
+- **No modo `Smtp`**: faça o mesmo e confira a **caixa de entrada** (e o spam). Se chegar, o log mostra
+  `E-mail enviado para …`. Se não, o log traz o erro do SMTP (autenticação, porta bloqueada, TLS, etc.).
+
+---
+
+## 8. Comandos do dia a dia
 
 ```bash
 # (deixe isto no ~/.bashrc; aqui para referência)
@@ -295,7 +384,7 @@ dotnet ef migrations remove    -p src/ReflowOven.Infrastructure -s src/ReflowOve
 
 ---
 
-## 8. Glossário
+## 9. Glossário
 
 - **Endpoint** — uma URL+método (ex.: `GET /api/programs`) que a API atende.
 - **Controller** — classe que agrupa endpoints relacionados.
@@ -313,7 +402,7 @@ dotnet ef migrations remove    -p src/ReflowOven.Infrastructure -s src/ReflowOve
 
 ---
 
-## 9. Solução de problemas
+## 10. Solução de problemas
 
 Estes são **exatamente** os tropeços que tivemos ao subir o projeto pela primeira vez — guarde para a próxima.
 
