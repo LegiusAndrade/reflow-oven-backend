@@ -632,3 +632,72 @@ mostra uma mensagem — **"Não houve desvio."** (run Concluído) ou **"Sem dado
 timeProgSeconds, timeRealSeconds, stageIndex }`) ao finalizar/registrar a execução — comparando o perfil
 programado com a trace medida por estágio. Quando vier preenchido, a tabela completa volta a aparecer
 sozinha (sem mudança no front); o "Não houve desvio." passa a significar, de fato, um run sem desvio.
+
+## ✅ Notificações "Limpar tudo" — endpoint já existe (2026-06-01)
+
+A tela de Notificações ganhou um botão **"Limpar tudo"** que apaga todas as notificações do usuário (além
+do mark-all-read automático ao abrir a tela, via `POST /api/notifications/read-all`). O front chama
+**`DELETE /api/notifications`** — que **já existe e responde `204`** (confirmado em runtime). Nenhuma
+mudança no backend é necessária; só registrando que o front passou a consumir esse endpoint (não remover).
+
+(Opcional, se um dia quiser granular: `DELETE /api/notifications/{id}` para apagar uma só — o front não usa.)
+
+## 🔧 PERFIL: começar a curva em 0 °C (não 25 °C ambiente) (2026-06-01)
+
+Hoje o backend, ao montar o **profile amostrado** a partir dos **segments**, prepende um ponto inicial
+`{ t: 0, temp: 25 }` (ambiente). Confirmado em runtime: `GET /api/programs/{id}` → `profile[0] = { t:0,
+temp:25 }` mesmo o primeiro segment sendo 260 °C. Isso faz a primeira rampa ir de **25→primeiro ponto**.
+
+**Decisão do dono:** a curva deve começar de **0 °C** — então "primeiro ponto 50 °C Linear" desenha a
+rampa **0→50**, não 25→50. (Combina com o novo mínimo de ponto = 50 °C; o ponto-base de início é isento
+desse mínimo.)
+
+**O que o backend precisa fazer:** ao derivar o profile dos segments, prepender `{ t: 0, temp: 0 }` em vez
+de `{ t: 0, temp: 25 }` (ajustar `DomainConstants`/serviço de programa que monta a curva). O front já
+mudou o **preview** do editor para começar em 0 (`ProgramEditorScreen.START_TEMP = 0`).
+
+**Atenção (mismatch temporário):** enquanto o backend ainda prepende 25, o **preview do editor mostra 0**
+mas o **profile salvo/exibido** (cards da galeria, fundo do gráfico de execução) e o **run real** ainda
+começam em 25. Some sozinho quando o backend prepender 0. (Obs.: comandar setpoint a partir de 0 °C é
+incomum num forno real, que parte do ambiente — mas foi a decisão do dono; se preferir, dá pra tornar a
+temperatura de partida um campo por-programa no futuro.)
+
+## 🔧 NOTIFICAÇÕES EM TEMPO REAL: push via SignalR (2026-06-01)
+
+Hoje o feed de notificações é só **REST polling** (`GET /api/notifications`, a cada 15s no front). O dono
+quer que **assim que surge uma notificação, a TopBar atualize** o contador — sem esperar o tick nem dar
+F5. Mitigações já feitas no front: (a) o feed é re-buscado **na hora** ao terminar uma execução (o badge
+sobe na hora p/ "Execução concluída/abortada"); (b) o polling caiu de 30s → 15s.
+
+**O que falta (backend) p/ tempo real de QUALQUER origem:** um hub **`/hubs/notifications`** (mesmo JWT
+via `?access_token=`, como telemetry/diagnostics) que emita um evento **`Notification`** com o
+`NotificationDto` (`{ id, kind, title, message, at, read }`) sempre que uma notificação for criada para
+aquele usuário. O front então conecta e, ao receber, atualiza o store (some o polling, ou vira só
+fallback). Enquanto o hub não existe, **não** conecto no front (evita conexão falhando e poluindo o
+terminal do dev) — fica no polling de 15s + refresh ao fim da execução.
+
+## 🔧 #8 — Soft-delete + Lixeira do Master (2026-06-01)
+
+Decisão do dono: parar de apagar de verdade. **Users, Programs e Notifications** viram **soft-delete**;
+só o **Master** vê uma "Lixeira" (aba própria em Configurações, só-Master) p/ restaurar/expurgar.
+
+1. Colunas `isDeleted` (bool) + `deletedAt` (timestamp) + `deletedBy` (quem apagou) em Users, Programs,
+   Notifications.
+2. Toda listagem normal filtra `isDeleted = false` → telas comuns não mudam.
+3. Os DELETE atuais viram **soft** (setam as flags), transparente pro front:
+   `DELETE /api/users/{id}`, `DELETE /api/programs/{id}`, `DELETE /api/notifications` (Limpar tudo) e
+   `DELETE /api/notifications/{id}` → marcam `isDeleted` em vez de remover.
+4. Endpoints **MasterOnly** (403 p/ Admin/Regular) — o front **já tem os métodos** (`api.ts`), shapes:
+   - `GET /api/users/deleted` → `(UserDto & { deletedAt: string; deletedBy: string })[]`
+   - `GET /api/programs/deleted` → `(ProgramDto & { deletedAt; deletedBy })[]`
+   - `GET /api/notifications/deleted` → `(NotificationDto & { deletedAt; deletedBy })[]`
+   - `POST /api/{users|programs|notifications}/{id}/restore` → 204 (limpa as flags).
+   - `DELETE /api/{users|programs|notifications}/{id}/purge` → 204 (apaga **definitivo/irreversível**).
+5. Nome de usuário único **inclusive contra apagados** (recriar nome de apagado → conflito 409; o Master
+   restaura). Manter a mensagem de conflito atual.
+6. Auditoria ("Alterações") **protegida**: o front já removeu a categoria do DbCleanupModal; o endpoint
+   `POST /api/maintenance/cleanup` deve **rejeitar/ignorar** a categoria `alteracoes`.
+
+**Front (feito agora):** removi "Registro de alterações" da Limpeza + adicionei os métodos no `api.ts`
+(`listDeleted*`/`restore*`/`purge*`). **Falta** a tela Lixeira — só monto quando os endpoints existirem
+(pra não dar 404 nem poluir o terminal). Local: aba própria de Configurações, só-Master.
