@@ -198,7 +198,7 @@ public sealed class ProgramServiceChangeLogTests
     }
 
     [Fact]
-    public async Task Editing_the_same_program_keeps_only_the_retention_cap_of_most_recent_changes()
+    public async Task Editing_the_same_program_keeps_the_full_change_history()
     {
         await using var db = NewContext();
         var service = NewService(db, new AdvancingClock());
@@ -207,20 +207,17 @@ public sealed class ProgramServiceChangeLogTests
 
         var created = await service.CreateAsync(new SaveProgramRequest("P0", null, Seg(150), null));
 
-        // 12 edits on top of the Criado row => 13 change rows attempted; retention keeps the last 10.
+        // 12 edits on top of the Criado row => 13 change rows; history is unbounded, so all survive.
         for (var k = 1; k <= 12; k++)
             await service.UpdateAsync(created.Id, new SaveProgramRequest($"E{k}", null, Seg(150 + k), null), userId: null);
 
         var rows = await db.Changes.Where(c => c.ProgramId == created.Id).ToListAsync();
         var targets = rows.Select(r => r.Target).ToList();
 
-        Assert.Equal(DomainConstants.ChangeRetentionPerProgramMax, rows.Count); // exactly 10
-        // The 3 oldest (Criado P0, E1, E2) were pruned; the 10 newest survive.
+        Assert.Equal(13, rows.Count); // 1 Criado + 12 Editado — nothing pruned (infinite history)
+        Assert.Contains("P0", targets);
+        Assert.Contains("E1", targets);
         Assert.Contains("E12", targets);
-        Assert.Contains("E3", targets);
-        Assert.DoesNotContain("P0", targets);
-        Assert.DoesNotContain("E1", targets);
-        Assert.DoesNotContain("E2", targets);
     }
 
     // ---- helpers ---------------------------------------------------------
@@ -241,7 +238,7 @@ public sealed class ProgramServiceChangeLogTests
         clock ??= new FixedClock();
         var current = new AnonymousUser();
         var audit = new AuditService(db, clock, current, NullLogger<AuditService>.Instance);
-        return new ProgramService(db, clock, audit);
+        return new ProgramService(db, clock, audit, current);
     }
 
     private sealed class FixedClock : IClock

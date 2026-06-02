@@ -38,23 +38,6 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
         });
     }
 
-    /// <summary>
-    /// Bound a program's change history: keep only the most recent
-    /// <see cref="DomainConstants.ChangeRetentionPerProgramMax"/> program-change rows for it and stage the
-    /// rest for deletion. Call this right AFTER staging the new row (still unsaved, so not yet in the DB):
-    /// we keep (cap − 1) persisted rows plus the just-staged one, landing at exactly the cap after save.
-    /// Prevents edit-spam on one program from growing the Alterações table without bound.
-    /// </summary>
-    public async Task PruneProgramChangesAsync(string programId, CancellationToken ct = default)
-    {
-        var stale = await db.Changes
-            .Where(c => c.ProgramId == programId && c.DetailKind == ChangeDetailKind.Program)
-            .OrderByDescending(c => c.At)
-            .Skip(DomainConstants.ChangeRetentionPerProgramMax - 1)
-            .ToListAsync(ct);
-        if (stale.Count > 0) db.Changes.RemoveRange(stale);
-    }
-
     public void RecordConfigChange(IReadOnlyList<string> bullets)
     {
         logger.LogInformation("Configuração alterada por '{Actor}': {Changes}.", current.Name ?? "sistema", string.Join("; ", bullets));

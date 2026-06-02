@@ -20,3 +20,13 @@ public sealed record NotificationDto(
 
 /// <summary>Unread badge count for the bell.</summary>
 public sealed record UnreadCountDto(int Count);
+
+/// <summary>A soft-deleted feed entry as the Master's "Apagados" (trash) view consumes it.</summary>
+public sealed record DeletedNotificationDto(
+    string Id,
+    NotificationFeedKind Kind,
+    DateTimeOffset At,
+    string Title,
+    string Message,
+    DateTimeOffset? DeletedAt,
+    string? DeletedBy);

@@ -5,7 +5,7 @@ namespace ReflowOven.Application.Services;
 /// plus <see cref="RaiseAsync"/> used by the run loop (execution finished) and the system monitor
 /// (central server up/down, update available). Feed entries are device-wide, not per-user.
 /// </summary>
-public sealed class NotificationService(IAppDbContext db, IClock clock)
+public sealed class NotificationService(IAppDbContext db, IClock clock, ICurrentUser current)
 {
     /// <summary>Most recent feed entries (newest first), server-clamped to <see cref="DomainConstants.NotificationFeedMax"/>.</summary>
     public async Task<IReadOnlyList<NotificationDto>> ListAsync(
@@ -51,5 +51,43 @@ public sealed class NotificationService(IAppDbContext db, IClock clock)
         return NotificationDto.From(n);
     }
 
-    public Task<int> ClearAsync(CancellationToken ct = default) => db.Notifications.ExecuteDeleteAsync(ct);
+    /// <summary>Soft-delete the visible feed (hides it); only the Master can list/restore/purge it afterwards.</summary>
+    public Task<int> ClearAsync(CancellationToken ct = default) =>
+        db.Notifications.ExecuteUpdateAsync(s => s
+            .SetProperty(n => n.IsDeleted, true)
+            .SetProperty(n => n.DeletedAt, clock.UtcNow)
+            .SetProperty(n => n.DeletedBy, current.Name), ct);
+
+    /// <summary>Master "trash": soft-deleted feed entries (newest-deleted first), capped to the feed max.</summary>
+    public async Task<IReadOnlyList<DeletedNotificationDto>> ListDeletedAsync(CancellationToken ct = default)
+    {
+        var rows = await db.Notifications.IgnoreQueryFilters()
+            .Where(n => n.IsDeleted)
+            .OrderByDescending(n => n.DeletedAt)
+            .Take(DomainConstants.NotificationFeedMax)
+            .ToListAsync(ct);
+        return rows.Select(n => new DeletedNotificationDto(n.Id.ToString(), n.Kind, n.At, n.Title, n.Message, n.DeletedAt, n.DeletedBy)).ToList();
+    }
+
+    /// <summary>Master action: restore a soft-deleted feed entry.</summary>
+    public async Task RestoreAsync(Guid id, CancellationToken ct = default)
+    {
+        var n = await db.Notifications.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == id && x.IsDeleted, ct)
+            ?? throw new NotFoundException("Notificação apagada não encontrada.");
+        n.IsDeleted = false;
+        n.DeletedAt = null;
+        n.DeletedBy = null;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Master action: permanently delete a soft-deleted feed entry (irreversible).</summary>
+    public async Task PurgeAsync(Guid id, CancellationToken ct = default)
+    {
+        var n = await db.Notifications.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == id && x.IsDeleted, ct)
+            ?? throw new NotFoundException("Notificação apagada não encontrada.");
+        db.Notifications.Remove(n);
+        await db.SaveChangesAsync(ct);
+    }
 }

@@ -45,3 +45,6 @@ public sealed record ProgramListQuery(
 /// idempotent (set to that exact state); when the body is absent/null the endpoint toggles.
 /// </summary>
 public sealed record SetFavoriteRequest(bool? Favorite);
+
+/// <summary>A soft-deleted program as the Master's "Apagados" (trash) view consumes it.</summary>
+public sealed record DeletedProgramDto(string Id, string Name, DateTimeOffset? DeletedAt, string? DeletedBy);

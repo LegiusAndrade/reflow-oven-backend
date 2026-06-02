@@ -16,6 +16,15 @@ public sealed record UserDto(
 
 public sealed record UserEventDto(string Label, int Count);
 
+/// <summary>A soft-deleted user as the Master's "Apagados" (trash) view consumes it — who/when it was deleted.</summary>
+public sealed record DeletedUserDto(
+    string Id,
+    string Name,
+    string Email,
+    UserType Type,
+    DateTimeOffset? DeletedAt,
+    string? DeletedBy);
+
 /// <summary>
 /// Create payload (MODEL B): the system generates the initial password and emails it; the admin never
 /// sets or sees it, so there is no <c>Password</c> field. The user must change it within

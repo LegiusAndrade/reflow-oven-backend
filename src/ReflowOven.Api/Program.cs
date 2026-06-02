@@ -111,6 +111,7 @@ builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
     .AddPolicy(AuthPolicies.AdminOnly, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.OperatorOrAdmin, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Regular), nameof(UserType.Master)))
+    .AddPolicy(AuthPolicies.MasterOnly, p => p.RequireRole(nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.CalibrationOnly, p => p.RequireClaim("calibration", "true"));
 
 // --- CORS for the Next.js frontend ------------------------------------------------------

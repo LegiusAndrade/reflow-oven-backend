@@ -36,7 +36,8 @@ public sealed class UserService(
             throw new ValidationAppException("Tipo de usuário inválido.");
 
         var lower = name.ToLowerInvariant();
-        if (await db.Users.AnyAsync(u => u.Name.ToLower() == lower, ct))
+        // Check across soft-deleted users too: a deleted user's name stays reserved (it may be restored).
+        if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Name.ToLower() == lower, ct))
             throw new ConflictException("Já existe um usuário com esse nome.");
 
         // The system generates the initial password and emails it; the admin never sets or sees it.
@@ -146,10 +147,48 @@ public sealed class UserService(
         if (await IsLastActiveAdminAsync(id, ct))
             throw new ConflictException("Não é possível remover o único administrador ativo.");
 
-        db.Users.Remove(user);
+        // Soft-delete: hidden everywhere by the global filter; only the Master can list/restore/purge it.
+        user.IsDeleted = true;
+        user.DeletedAt = clock.UtcNow;
+        user.DeletedBy = current.Name;
         await audit.BumpActivityAsync(Defaults.ActivityLabels[3], ct); // usuários deletados
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("Usuário removido: '{Name}' por '{Actor}'.", user.Name, current.Name);
+        logger.LogInformation("Usuário removido (soft): '{Name}' por '{Actor}'.", user.Name, current.Name);
+    }
+
+    /// <summary>Master "trash": soft-deleted users (newest first), with who/when. The Master is never listed.</summary>
+    public async Task<IReadOnlyList<DeletedUserDto>> ListDeletedAsync(CancellationToken ct = default)
+    {
+        var users = await db.Users.IgnoreQueryFilters()
+            .Where(u => u.IsDeleted && u.Type != UserType.Master)
+            .OrderByDescending(u => u.DeletedAt)
+            .ToListAsync(ct);
+        return users.Select(u => new DeletedUserDto(u.Id.ToString(), u.Name, u.Email, u.Type, u.DeletedAt, u.DeletedBy)).ToList();
+    }
+
+    /// <summary>Master action: restore a soft-deleted user. Its name was reserved, so there is no live collision.</summary>
+    public async Task<UserDto> RestoreAsync(Guid id, CancellationToken ct = default)
+    {
+        var user = await db.Users.IgnoreQueryFilters().Include(u => u.ActivityStats)
+            .FirstOrDefaultAsync(u => u.Id == id && u.IsDeleted && u.Type != UserType.Master, ct)
+            ?? throw new NotFoundException("Usuário apagado não encontrado.");
+        user.IsDeleted = false;
+        user.DeletedAt = null;
+        user.DeletedBy = null;
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Usuário restaurado: '{Name}' por '{Actor}'.", user.Name, current.Name);
+        return Map(user);
+    }
+
+    /// <summary>Master action: permanently delete a soft-deleted user (irreversible).</summary>
+    public async Task PurgeAsync(Guid id, CancellationToken ct = default)
+    {
+        var user = await db.Users.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == id && u.IsDeleted && u.Type != UserType.Master, ct)
+            ?? throw new NotFoundException("Usuário apagado não encontrado.");
+        db.Users.Remove(user);
+        await db.SaveChangesAsync(ct);
+        logger.LogWarning("Usuário expurgado (definitivo): '{Name}' por '{Actor}'.", user.Name, current.Name);
     }
 
     /// <summary>True when <paramref name="userId"/> is an active admin and no other active admin exists.</summary>

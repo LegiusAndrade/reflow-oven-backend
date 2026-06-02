@@ -23,6 +23,8 @@ public class ReflowProgram
 
     public bool IsDeleted { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
+    /// <summary>Name of whoever deleted it (shown in the Master's trash view); null while live.</summary>
+    public string? DeletedBy { get; set; }
 
     /// <summary>True for built-in catalog programs (hidden, not removed, on delete/factory-reset).</summary>
     public bool IsSeed { get; set; }

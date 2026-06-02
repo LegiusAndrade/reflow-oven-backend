@@ -22,4 +22,10 @@ public class Notification
     public string Title { get; set; } = "";
     public string Message { get; set; } = "";
     public bool Read { get; set; }
+
+    /// <summary>Soft-delete tombstone. "Clear" hides feed entries (global query filter) instead of removing
+    /// them; only the dev Master can list/restore/purge them.</summary>
+    public bool IsDeleted { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    public string? DeletedBy { get; set; }
 }

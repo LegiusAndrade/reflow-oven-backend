@@ -10,6 +10,10 @@ public static class AuthPolicies
     /// <summary>Runs may be started/stopped by an operator (Regular), an Admin, or the Master.</summary>
     public const string OperatorOrAdmin = "OperatorOrAdmin";
 
+    /// <summary>The dev <c>Master</c> superuser ONLY (Admins do NOT satisfy this). Guards the "trash":
+    /// viewing/restoring/purging the soft-deleted records that ordinary screens hide.</summary>
+    public const string MasterOnly = "MasterOnly";
+
     /// <summary>The hidden Calibração tab — requires the technician's "calibration" claim.</summary>
     public const string CalibrationOnly = "CalibrationOnly";
 }

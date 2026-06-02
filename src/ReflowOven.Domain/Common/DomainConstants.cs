@@ -86,9 +86,9 @@ public static class DomainConstants
     /// <summary>Free-disk threshold (%) below which the system monitor warns (bell + e-mail to admins).</summary>
     public const double DiskLowFreePercent = 10;
 
-    /// <summary>Max change-log rows kept per program (the most recent are kept; older ones are pruned on the
-    /// next program change). Bounds the Alterações table so repeatedly editing one program can't grow it
-    /// without bound. Config changes (no ProgramId) are not pruned by this.</summary>
+    /// <summary>Default number of recent edits the front's change-history view fetches per program (mirrored
+    /// by <c>CHANGE_RETENTION_PER_PROGRAM_MAX</c> in limits.ts). NOTE: the Alterações audit log is no longer
+    /// pruned — change history is kept indefinitely; this is only a UI/paging hint, not a deletion cap.</summary>
     public const int ChangeRetentionPerProgramMax = 10;
 
     // --- Diagnóstico (rankings) -----------------------------------------------------------

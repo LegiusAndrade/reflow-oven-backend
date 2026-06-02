@@ -13,7 +13,6 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
     public async Task<MaintenanceOverviewDto> OverviewAsync(CancellationToken ct = default)
     {
         var exec = await db.Executions.CountAsync(ct);
-        var changes = await db.Changes.CountAsync(ct);
         var errors = await db.Errors.CountAsync(ct);
         var logs = await db.SystemLog.CountAsync(ct);
         var inativos = await db.Users.CountAsync(u => u.Status == UserStatus.Inativo, ct);
@@ -25,10 +24,10 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var usersTable = sizes.TryGetValue("Users", out var ub) ? ub : totalUsers * BytesPerRecord;
         var inativosBytes = totalUsers > 0 ? (long)Math.Round(usersTable * (double)inativos / totalUsers) : 0;
 
+        // The Alterações (audit) log is intentionally absent: it is protected — never cleanable from here.
         var categories = new List<CategorySizeDto>
         {
             new(CleanupId.Execucoes, "Execuções", exec, TableBytes("Executions", exec)),
-            new(CleanupId.Alteracoes, "Alterações", changes, TableBytes("Changes", changes)),
             new(CleanupId.Falhas, "Falhas", errors, TableBytes("Errors", errors)),
             new(CleanupId.Logs, "Logs", logs, TableBytes("SystemLog", logs)),
             new(CleanupId.Inativos, "Usuários inativos", inativos, inativosBytes),
@@ -48,7 +47,8 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             deleted += cat switch
             {
                 CleanupId.Execucoes => await db.Executions.ExecuteDeleteAsync(ct),
-                CleanupId.Alteracoes => await db.Changes.ExecuteDeleteAsync(ct),
+                // The Alterações (audit) log is protected — reject any attempt to clear it.
+                CleanupId.Alteracoes => throw new ValidationAppException("O log de Alterações (auditoria) é protegido e não pode ser apagado."),
                 CleanupId.Falhas => await db.Errors.ExecuteDeleteAsync(ct),
                 CleanupId.Logs => await db.SystemLog.ExecuteDeleteAsync(ct),
                 CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo).ExecuteDeleteAsync(ct),
@@ -70,10 +70,11 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         await db.Errors.ExecuteDeleteAsync(ct);
         await db.Changes.ExecuteDeleteAsync(ct);
         await db.SystemLog.ExecuteDeleteAsync(ct);
-        await db.Favorites.ExecuteDeleteAsync(ct);
-        await db.PasswordResetTokens.ExecuteDeleteAsync(ct);
-        await db.UserActivityStats.ExecuteDeleteAsync(ct);
-        await db.Users.ExecuteDeleteAsync(ct);
+        // IgnoreQueryFilters so the reset also wipes soft-deleted rows (the global filters hide them otherwise).
+        await db.Favorites.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+        await db.PasswordResetTokens.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+        await db.UserActivityStats.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+        await db.Users.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
 
         // Programs: drop ALL (including hidden seeds) and reseed just the factory default.
         await db.Programs.IgnoreQueryFilters().ExecuteDeleteAsync(ct);

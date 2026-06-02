@@ -88,7 +88,7 @@ public sealed class ProgramServiceTempFloorTests
         var clock = new FixedClock();
         var current = new AnonymousUser();
         var audit = new AuditService(db, clock, current, NullLogger<AuditService>.Instance);
-        return new ProgramService(db, clock, audit);
+        return new ProgramService(db, clock, audit, current);
     }
 
     private sealed class FixedClock : IClock

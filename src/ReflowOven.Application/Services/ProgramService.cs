@@ -4,7 +4,7 @@ namespace ReflowOven.Application.Services;
 /// Programs gallery + editor backend: search/filter/sort/paginate, CRUD (segments → profile via
 /// <see cref="ProfileBuilder"/>), per-user favorites, soft-delete and change-log auditing.
 /// </summary>
-public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService audit)
+public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService audit, ICurrentUser current)
 {
     public async Task<PagedResult<ProgramDto>> ListAsync(ProgramListQuery q, Guid? userId, CancellationToken ct = default)
     {
@@ -74,7 +74,6 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         };
         db.Programs.Add(program);
         audit.RecordProgramChange(ChangeAction.Criado, program, BuildPoints(program, ChangePointRole.Added));
-        await audit.PruneProgramChangesAsync(program.Id, ct);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[4], ct); // programas criados
         await db.SaveChangesAsync(ct);
         return Map(program, false);
@@ -98,7 +97,6 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
 
         var after = BuildPoints(program, ChangePointRole.ChangedAfter);
         audit.RecordProgramChange(ChangeAction.Editado, program, BuildEditDiff(before, after));
-        await audit.PruneProgramChangesAsync(program.Id, ct);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[5], ct); // programas alterados
         await db.SaveChangesAsync(ct);
 
@@ -113,9 +111,41 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
 
         program.IsDeleted = true;
         program.DeletedAt = clock.UtcNow;
+        program.DeletedBy = current.Name;
         audit.RecordProgramChange(ChangeAction.Removido, program, BuildPoints(program, ChangePointRole.Removed));
-        await audit.PruneProgramChangesAsync(program.Id, ct);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[6], ct); // programas deletados
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Master "trash": soft-deleted programs (newest first), with who/when. Seed programs included.</summary>
+    public async Task<IReadOnlyList<DeletedProgramDto>> ListDeletedAsync(CancellationToken ct = default)
+    {
+        var rows = await db.Programs.IgnoreQueryFilters()
+            .Where(p => p.IsDeleted)
+            .OrderByDescending(p => p.DeletedAt)
+            .ToListAsync(ct);
+        return rows.Select(p => new DeletedProgramDto(p.Id, p.Name, p.DeletedAt, p.DeletedBy)).ToList();
+    }
+
+    /// <summary>Master action: bring a soft-deleted program back into the catalog.</summary>
+    public async Task RestoreAsync(string id, CancellationToken ct = default)
+    {
+        var program = await db.Programs.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id && p.IsDeleted, ct)
+            ?? throw new NotFoundException("Programa apagado não encontrado.");
+        program.IsDeleted = false;
+        program.DeletedAt = null;
+        program.DeletedBy = null;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Master action: permanently delete a soft-deleted program (irreversible; its favorites cascade).</summary>
+    public async Task PurgeAsync(string id, CancellationToken ct = default)
+    {
+        var program = await db.Programs.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id && p.IsDeleted, ct)
+            ?? throw new NotFoundException("Programa apagado não encontrado.");
+        db.Programs.Remove(program); // FK cascade drops its favorites
         await db.SaveChangesAsync(ct);
     }
 

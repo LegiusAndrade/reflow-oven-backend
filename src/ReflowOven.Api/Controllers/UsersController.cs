@@ -27,4 +27,21 @@ public sealed class UsersController(UserService users) : ControllerBase
         await users.DeleteAsync(id, ct);
         return NoContent();
     }
+
+    // --- Master "trash" (soft-deleted users): only the dev Master may view/restore/purge -------------
+    [Authorize(Policy = AuthPolicies.MasterOnly)]
+    [HttpGet("deleted")]
+    public Task<IReadOnlyList<DeletedUserDto>> ListDeleted(CancellationToken ct) => users.ListDeletedAsync(ct);
+
+    [Authorize(Policy = AuthPolicies.MasterOnly)]
+    [HttpPost("{id:guid}/restore")]
+    public Task<UserDto> Restore(Guid id, CancellationToken ct) => users.RestoreAsync(id, ct);
+
+    [Authorize(Policy = AuthPolicies.MasterOnly)]
+    [HttpDelete("{id:guid}/purge")]
+    public async Task<IActionResult> Purge(Guid id, CancellationToken ct)
+    {
+        await users.PurgeAsync(id, ct);
+        return NoContent();
+    }
 }

@@ -38,6 +38,27 @@ public sealed class ProgramsController(ProgramService programs, ICurrentUser cur
         return NoContent();
     }
 
+    // --- Master "trash" (soft-deleted programs): only the dev Master may view/restore/purge ----------
+    [Authorize(Policy = AuthPolicies.MasterOnly)]
+    [HttpGet("deleted")]
+    public Task<IReadOnlyList<DeletedProgramDto>> ListDeleted(CancellationToken ct) => programs.ListDeletedAsync(ct);
+
+    [Authorize(Policy = AuthPolicies.MasterOnly)]
+    [HttpPost("{id}/restore")]
+    public async Task<IActionResult> Restore(string id, CancellationToken ct)
+    {
+        await programs.RestoreAsync(id, ct);
+        return NoContent();
+    }
+
+    [Authorize(Policy = AuthPolicies.MasterOnly)]
+    [HttpDelete("{id}/purge")]
+    public async Task<IActionResult> Purge(string id, CancellationToken ct)
+    {
+        await programs.PurgeAsync(id, ct);
+        return NoContent();
+    }
+
     [HttpPost("{id}/favorite")]
     public async Task<ActionResult<FavoriteResult>> ToggleFavorite(
         string id,

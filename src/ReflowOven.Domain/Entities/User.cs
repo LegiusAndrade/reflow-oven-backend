@@ -2,8 +2,9 @@ namespace ReflowOven.Domain.Entities;
 
 /// <summary>
 /// An application account. The frontend used a string id (slug or epoch); the backend uses a
-/// Guid that is serialized as a string to keep the JSON contract. Users are HARD-deleted
-/// (the frontend has no user soft-delete). The hidden "calibracao" technician is NOT a row here.
+/// Guid that is serialized as a string to keep the JSON contract. Users are SOFT-deleted
+/// (<see cref="IsDeleted"/> + a global query filter): a deleted user is hidden everywhere and only
+/// the dev Master can view/restore/purge it. The hidden "calibracao" technician is NOT a row here.
 /// </summary>
 public class User
 {
@@ -39,6 +40,13 @@ public class User
 
     /// <summary>Last "please change your password" reminder we emailed (throttle: at most once a day).</summary>
     public DateTimeOffset? LastPasswordReminderAt { get; set; }
+
+    /// <summary>Soft-delete tombstone. A deleted user is hidden by the global query filter (grid, login,
+    /// rankings, …); only the dev Master can list/restore/purge it. The name stays reserved while deleted.</summary>
+    public bool IsDeleted { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    /// <summary>Name of whoever deleted it (shown in the Master's trash view); null while live.</summary>
+    public string? DeletedBy { get; set; }
 
     /// <summary>Per-action activity counters shown in the user-detail modal (the 7 pt-BR labels).</summary>
     public ICollection<UserActivityStat> ActivityStats { get; set; } = new List<UserActivityStat>();

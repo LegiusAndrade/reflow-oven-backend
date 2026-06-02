@@ -45,6 +45,9 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.ToTable(t => t.HasCheckConstraint("CK_Users_Name", $"\"Name\" ~ '{DomainConstants.UserNameDbCheck}'"));
             e.Property(u => u.Email).HasMaxLength(DomainConstants.EmailMaxLength);
             e.Property(u => u.PasswordHash).HasMaxLength(100);
+            e.Property(u => u.DeletedBy).HasMaxLength(DomainConstants.UserNameMaxLength);
+            e.HasQueryFilter(u => !u.IsDeleted); // soft-delete: deleted users are hidden everywhere by default
+            e.HasIndex(u => u.IsDeleted);
             e.HasMany(u => u.ActivityStats).WithOne(s => s.User!).HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
             e.OwnsOne(u => u.Preferences, p => p.ToJson());
         });
@@ -54,6 +57,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.HasKey(s => s.Id);
             e.Property(s => s.Label).HasMaxLength(64);
             e.HasIndex(s => new { s.UserId, s.Label }).IsUnique();
+            e.HasQueryFilter(s => !s.User!.IsDeleted); // follow the owning user's soft-delete filter
         });
 
         b.Entity<PasswordResetToken>(e =>
@@ -61,6 +65,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.HasKey(t => t.Id);
             e.Property(t => t.TokenHash).HasMaxLength(100);
             e.HasOne(t => t.User).WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(t => !t.User!.IsDeleted); // follow the owning user's soft-delete filter
         });
 
         b.Entity<ReflowProgram>(e =>
@@ -69,6 +74,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(p => p.Id).HasMaxLength(64);
             e.Property(p => p.Name).HasMaxLength(DomainConstants.ProgramNameMaxLength).IsRequired();
             e.Property(p => p.Description).HasMaxLength(DomainConstants.ProgramDescriptionMaxLength);
+            e.Property(p => p.DeletedBy).HasMaxLength(DomainConstants.UserNameMaxLength);
             e.OwnsMany(p => p.Profile, o => o.ToJson());
             e.OwnsMany(p => p.Segments, o => o.ToJson());
             e.HasQueryFilter(p => !p.IsDeleted);
@@ -81,8 +87,8 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(f => f.ProgramId).HasMaxLength(64);
             e.HasOne(f => f.User).WithMany().HasForeignKey(f => f.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(f => f.Program).WithMany().HasForeignKey(f => f.ProgramId).OnDelete(DeleteBehavior.Cascade);
-            // Match the principal's soft-delete filter so favorites of hidden programs drop out too.
-            e.HasQueryFilter(f => !f.Program!.IsDeleted);
+            // Match both principals' soft-delete filters so favorites of hidden programs/users drop out too.
+            e.HasQueryFilter(f => !f.Program!.IsDeleted && !f.User!.IsDeleted);
         });
 
         b.Entity<ExecutionReport>(e =>
@@ -158,8 +164,11 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.HasKey(n => n.Id);
             e.Property(n => n.Title).HasMaxLength(120);
             e.Property(n => n.Message).HasMaxLength(500);
+            e.Property(n => n.DeletedBy).HasMaxLength(DomainConstants.UserNameMaxLength);
+            e.HasQueryFilter(n => !n.IsDeleted); // soft-delete: cleared notifications are hidden by default
             e.HasIndex(n => n.At);
             e.HasIndex(n => n.Read);
+            e.HasIndex(n => n.IsDeleted);
         });
 
         b.Entity<Settings>(e =>
