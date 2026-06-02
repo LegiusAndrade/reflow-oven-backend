@@ -471,6 +471,15 @@ Numa primeira versão o EF avisava sobre o filtro global de soft-delete dos prog
 de favoritos. Já corrigimos adicionando um filtro de consulta correspondente em `FavoriteProgram` no
 `ReflowDbContext`. Se você ainda vir esse aviso, atualize o código (`git pull`).
 
+### E-mails não enviam / autenticação SMTP do Gmail falha
+Com `Email__Mode=Smtp` apontando para o Gmail, ele **não aceita a senha normal da conta** quando há
+verificação em duas etapas — exige uma **Senha de app** (16 caracteres, gerada em
+<https://myaccount.google.com/apppasswords>). Sintoma típico no log: `535 5.7.8 Username and Password not
+accepted`. Solução: ative o 2FA na conta Google, gere a Senha de app e use-a em `Email__Smtp__Password`
+(o `Email__Smtp__User`/`From` é o endereço completo). Passo a passo na [seção 7](#7-configurar-o-e-mail-smtp).
+O envio é *best-effort* — uma falha de e-mail **nunca derruba a operação** (o usuário é criado mesmo assim),
+só fica registrada no log.
+
 ---
 
 Dúvida em algum arquivo específico? Abra ele e procure o comentário `///` no topo da classe — quase tudo
