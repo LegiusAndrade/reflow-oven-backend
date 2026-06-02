@@ -16,12 +16,15 @@ public static class DomainConstants
     /// parabola segment expands into 12 sub-points) and is bounded only by the segment count.</summary>
     public const int ProfileMaxPoints = 100;
 
-    public const int PointTempMin = 0;
+    /// <summary>Lowest temperature (°C) a user may enter for a profile point/segment. The fixed t=0
+    /// ambient start (<see cref="StartTemp"/>) sits below this floor by design and is exempt from it.</summary>
+    public const int PointTempMin = 50;
     public const int PointTempMax = 500;
     public const int PointDurationMin = 0;
     public const int PointDurationMax = 3600;
 
-    /// <summary>Every profile starts at this temperature (°C) at t=0.</summary>
+    /// <summary>Every profile starts at this temperature (°C) at t=0 — the ambient start, exempt from
+    /// <see cref="PointTempMin"/>.</summary>
     public const int StartTemp = 25;
 
     // --- Configurações --------------------------------------------------------------------

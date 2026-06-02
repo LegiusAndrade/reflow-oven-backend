@@ -214,7 +214,13 @@ public static class Defaults
         RunCount = runCount,
         LastUsed = ParseDate(lastUsed),
         IsSeed = true,
-        Profile = pts.Select(p => new ProfilePoint { T = p.t, Temp = p.temp }).ToList(),
+        // Reflow cooldowns dip toward ambient; raise any t>0 point to the entry floor (PointTempMin),
+        // leaving the fixed t=0 ambient start (25 °C) untouched so seeds honor the same rule as the editor.
+        Profile = pts.Select(p => new ProfilePoint
+        {
+            T = p.t,
+            Temp = p.t > 0 ? Math.Max(p.temp, DomainConstants.PointTempMin) : p.temp,
+        }).ToList(),
     };
 
     private static DateTimeOffset? ParseDate(string? ddMMyyyy)

@@ -182,10 +182,12 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
 
             profile = req.Profile.Select(p =>
             {
-                if (p.Temp < DomainConstants.PointTempMin || p.Temp > DomainConstants.PointTempMax)
-                    throw new ValidationAppException($"Temperatura fora da faixa {DomainConstants.PointTempMin}..{DomainConstants.PointTempMax} °C.");
                 if (p.T < 0)
                     throw new ValidationAppException("Tempo do ponto não pode ser negativo.");
+                // The t=0 ambient start (StartTemp) is exempt from the entry floor; every later point ≥ PointTempMin.
+                var tempMin = p.T > 0 ? DomainConstants.PointTempMin : 0;
+                if (p.Temp < tempMin || p.Temp > DomainConstants.PointTempMax)
+                    throw new ValidationAppException($"Temperatura fora da faixa {DomainConstants.PointTempMin}..{DomainConstants.PointTempMax} °C.");
                 return new ProfilePoint { T = p.T, Temp = p.Temp };
             }).ToList();
         }
