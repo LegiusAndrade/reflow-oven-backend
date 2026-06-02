@@ -592,3 +592,43 @@ de `SystemLog` por `conn.on("SystemLogEntry", ...)`.
 3. Implementar o hub de push do log agora (tempo real) ou manter o polling de 2s por enquanto?
 4. O log do **Navegador** é puramente client-side (efêmero). Se quiser que o log do dev seja **persistido**
    server-side além do `SystemLog`, é um item à parte — confirmar se é desejado.
+
+## ⚠️ DEPLOY/DADOS: diff estruturado + curvas + `?before=` não estão sendo servidos (2026-05-31, 23h)
+
+O **front já consome** o diff estruturado da Alteração (Validação #6 / bug #7 do front), mas a **instância
+em execução** (`localhost:5248`) **não devolve esses campos** — o código-fonte os tem (`ReportDtos.cs`/
+`ReportService.cs`), porém o build rodando responde no formato antigo. Verificado por `GET /api/changes/{id}`
+em todos os registros semeados:
+
+- `diff` = **null**, `beforeCurve` = **null**, `afterCurve` = **null** em toda Alteração (Criado/Editado/Removido).
+- `GET /api/changes?before=<ISO>` é **ignorado**: `total` é o mesmo com e sem `before` (testado 41 == 41),
+  então o filtro por data (front bug #7d — não listar edições posteriores à aberta) **não funciona** ainda.
+- Os `points` ainda vêm com `role` uniforme antigo (`added`/`removed`/`changed-before`/`changed-after`),
+  sem `unchanged` e sem `changedFields`.
+
+**O que o backend precisa fazer (provável):** **rebuild + restart** da API com o código que popula
+`Diff`/`BeforeCurve`/`AfterCurve` e aplica `ReportQuery.Before`; e **re-seed/recompute** das Alterações
+existentes para que o diff por ponto seja calculado (os registros semeados são anteriores ao diff).
+
+**Enquanto isso, o front não regride:** quando `afterCurve`/`beforeCurve` vêm nulos, o `reportsClient`
+reconstrói a curva a partir dos pontos (gráfico continua aparecendo); quando `diff` vem nulo, as tabelas
+caem no formato por `role`; e quando `?before=` é ignorado, a lista de edições degrada para "todas menos a
+atual". Assim que o backend servir os campos, o **destaque por `changedFields`** (célula a célula, como no
+Figma "Example Change Program"), a curva **antes×depois** real e o **filtro por data** acendem sozinhos —
+sem mudança no front.
+
+## ⚠️ DEPLOY/DADOS: `comparison` (Comparativo do Perfil) vem vazio em TODA execução (2026-06-01)
+
+`GET /api/executions/{id}` devolve **`comparison: []`** em todos os registros — inclusive em runs
+**Concluído** (testado: `c4e9f52b` Concluído, `056aae19` Abortado, `7c2a1f0d` Falha → todos 0 linhas). O
+front renderiza a tabela "Comparativo do Perfil" a partir desse array (programado × medido por estágio,
+com a coluna **Desvio**), então hoje a tabela nunca aparece.
+
+**Front (já feito):** quando `comparison` está vazio, em vez de imprimir só o cabeçalho da tabela o front
+mostra uma mensagem — **"Não houve desvio."** (run Concluído) ou **"Sem dados de comparação."**
+(Falha/Abortado, pois aí o vazio é falta de dado, não ausência de desvio).
+
+**O que o backend precisa fazer:** popular `comparison` (lista de `{ tempProg, tempReal,
+timeProgSeconds, timeRealSeconds, stageIndex }`) ao finalizar/registrar a execução — comparando o perfil
+programado com a trace medida por estágio. Quando vier preenchido, a tabela completa volta a aparecer
+sozinha (sem mudança no front); o "Não houve desvio." passa a significar, de fato, um run sem desvio.
