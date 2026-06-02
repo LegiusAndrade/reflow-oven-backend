@@ -17,15 +17,15 @@ public static class DomainConstants
     public const int ProfileMaxPoints = 100;
 
     /// <summary>Lowest temperature (°C) a user may enter for a profile point/segment. The fixed t=0
-    /// ambient start (<see cref="StartTemp"/>) sits below this floor by design and is exempt from it.</summary>
+    /// baseline start (<see cref="StartTemp"/>) sits below this floor by design and is exempt from it.</summary>
     public const int PointTempMin = 50;
     public const int PointTempMax = 500;
     public const int PointDurationMin = 0;
     public const int PointDurationMax = 3600;
 
-    /// <summary>Every profile starts at this temperature (°C) at t=0 — the ambient start, exempt from
+    /// <summary>Every profile starts at this temperature (°C) at t=0 — the baseline start, exempt from
     /// <see cref="PointTempMin"/>.</summary>
-    public const int StartTemp = 25;
+    public const int StartTemp = 0;
 
     // --- Configurações --------------------------------------------------------------------
     public const double PidMin = 0;

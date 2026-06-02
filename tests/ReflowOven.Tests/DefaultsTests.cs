@@ -28,11 +28,11 @@ public class DefaultsTests
     }
 
     [Fact]
-    public void Factory_program_starts_at_ambient()
+    public void Factory_program_starts_at_baseline()
     {
         var program = Defaults.FactoryProgram();
         Assert.Equal(Defaults.FactoryProgramId, program.Id);
         Assert.Equal(0, program.Profile[0].T);
-        Assert.Equal(25, program.Profile[0].Temp);
+        Assert.Equal(0, program.Profile[0].Temp); // baseline start (was 25 ambient)
     }
 }

@@ -14,7 +14,7 @@ public class ProfileBuilderTests
 
         Assert.Equal(2, profile.Count);
         Assert.Equal(0, profile[0].T);
-        Assert.Equal(25, profile[0].Temp); // START_TEMP
+        Assert.Equal(0, profile[0].Temp); // START_TEMP (baseline)
         Assert.Equal(90, profile[1].T);
         Assert.Equal(150, profile[1].Temp);
     }

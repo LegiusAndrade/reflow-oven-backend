@@ -214,7 +214,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
             {
                 if (p.T < 0)
                     throw new ValidationAppException("Tempo do ponto não pode ser negativo.");
-                // The t=0 ambient start (StartTemp) is exempt from the entry floor; every later point ≥ PointTempMin.
+                // The t=0 baseline start (StartTemp) is exempt from the entry floor; every later point ≥ PointTempMin.
                 var tempMin = p.T > 0 ? DomainConstants.PointTempMin : 0;
                 if (p.Temp < tempMin || p.Temp > DomainConstants.PointTempMax)
                     throw new ValidationAppException($"Temperatura fora da faixa {DomainConstants.PointTempMin}..{DomainConstants.PointTempMax} °C.");

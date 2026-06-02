@@ -346,7 +346,7 @@ public static partial class DbSeeder
             IsSeed = false,
             Profile =
             [
-                new() { T = 0, Temp = 25 },
+                new() { T = 0, Temp = 0 },
                 new() { T = 90, Temp = 150 },
                 new() { T = 180, Temp = 180 },
                 new() { T = 210, Temp = 217 },

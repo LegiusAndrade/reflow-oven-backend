@@ -155,7 +155,7 @@ public static class Defaults
     // --- Programs (factory default + catalog) ---------------------------------------------
     public static ReflowProgram FactoryProgram() => Catalog(
         FactoryProgramId, "Perfil Padrão", 0, null,
-        [(0, 25), (90, 150), (180, 180), (210, 217), (240, 245), (270, 210), (330, 120), (390, 45)]);
+        [(0, 0), (90, 150), (180, 180), (210, 217), (240, 245), (270, 210), (330, 120), (390, 45)]);
 
     /// <summary>The ~50 built-in catalog programs (6 hand-crafted + 44 generated), mirroring programs.ts.</summary>
     public static List<ReflowProgram> CatalogPrograms()
@@ -163,17 +163,17 @@ public static class Defaults
         var list = new List<ReflowProgram>
         {
             Catalog("smd-270", "ReflowOven SMD 270ºC", 23, "01/03/1993",
-                [(0, 25), (90, 150), (180, 180), (210, 217), (240, 270), (270, 230), (330, 120), (390, 45)]),
+                [(0, 0), (90, 150), (180, 180), (210, 217), (240, 270), (270, 230), (330, 120), (390, 45)]),
             Catalog("smd-lead-free", "SMD Sem Chumbo 245ºC", 8, "12/04/2026",
-                [(0, 25), (90, 150), (180, 175), (225, 217), (255, 245), (285, 210), (345, 110), (400, 45)]),
+                [(0, 0), (90, 150), (180, 175), (225, 217), (255, 245), (285, 210), (345, 110), (400, 45)]),
             Catalog("test-large-board", "Teste Placa Grande", 2, "20/05/2026",
-                [(0, 25), (120, 120), (240, 150), (300, 180), (360, 150), (450, 80), (520, 40)]),
+                [(0, 0), (120, 120), (240, 150), (300, 180), (360, 150), (450, 80), (520, 40)]),
             Catalog("adhesive-cure", "Cura de Adesivo 120ºC", 5, "03/05/2026",
-                [(0, 25), (60, 80), (150, 120), (300, 120), (380, 60), (440, 35)]),
+                [(0, 0), (60, 80), (150, 120), (300, 120), (380, 60), (440, 35)]),
             Catalog("bga-rework", "BGA Rework 250ºC", 12, "18/05/2026",
-                [(0, 25), (90, 150), (180, 200), (230, 235), (260, 250), (290, 215), (360, 120), (420, 50)]),
+                [(0, 0), (90, 150), (180, 200), (230, 235), (260, 250), (290, 215), (360, 120), (420, 50)]),
             Catalog("preheat-90", "Pré-aquecimento 90ºC", 41, "22/05/2026",
-                [(0, 25), (120, 90), (300, 90), (400, 45)]),
+                [(0, 0), (120, 90), (300, 90), (400, 45)]),
         };
 
         string[] types = ["SMD", "BGA", "QFN", "Sem Chumbo", "Cura", "Reballing", "Teste", "Pré-aquec."];
@@ -196,7 +196,7 @@ public static class Defaults
         (double, double) At(double frac, double temp) => (Math.Round(totalSec * frac), Math.Round(temp));
         return
         [
-            (0, 25),
+            (0, 0),
             At(0.2, peak * 0.55),
             At(0.42, peak * 0.7),
             At(0.55, peak * 0.85),
@@ -214,8 +214,8 @@ public static class Defaults
         RunCount = runCount,
         LastUsed = ParseDate(lastUsed),
         IsSeed = true,
-        // Reflow cooldowns dip toward ambient; raise any t>0 point to the entry floor (PointTempMin),
-        // leaving the fixed t=0 ambient start (25 °C) untouched so seeds honor the same rule as the editor.
+        // Reflow cooldowns dip toward the baseline; raise any t>0 point to the entry floor (PointTempMin),
+        // leaving the fixed t=0 baseline start (0 °C) untouched so seeds honor the same rule as the editor.
         Profile = pts.Select(p => new ProfilePoint
         {
             T = p.t,
