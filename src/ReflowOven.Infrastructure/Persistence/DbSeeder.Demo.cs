@@ -78,16 +78,10 @@ public static partial class DbSeeder
             for (var i = 0; i < 16; i++)
                 db.Changes.Add(BuildChange(i, now, programs, users));
 
-            // Item J: one program edited ~12 times so the Alterações report demonstrates the per-program
-            // retention cutoff (ChangeRetentionPerProgramMax). Retention is enforced on WRITE only
-            // (AuditService.PruneProgramChangesAsync keeps the most recent N), so mirror that here: build
-            // 12 rows (1 Criado + 11 Editado) and persist only the most recent N by timestamp — the 2
-            // oldest (the Criado + the first Editado) drop out, visibly showing the cutoff.
+            // Item J: one program edited ~12 times so the Alterações report shows a rich edit history.
+            // Change history is now unbounded (no pruning), so persist every row (1 Criado + 11 Editado).
             var churnProgram = await SeedEditChurnProgramAsync(db, ct);
-            var churn = BuildEditChurnHistory(churnProgram, now, users);
-            foreach (var c in churn
-                         .OrderByDescending(c => c.At)
-                         .Take(DomainConstants.ChangeRetentionPerProgramMax))
+            foreach (var c in BuildEditChurnHistory(churnProgram, now, users))
                 db.Changes.Add(c);
         }
 
@@ -208,7 +202,7 @@ public static partial class DbSeeder
             EndAt = at,
             InputVoltage = 120 + Hash($"iv{i}") % 14,
             OutputVoltage = Hash($"ov{i}") % 180,
-            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries() },
+            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries(i) },
             Events =
             [
                 new() { At = at.AddSeconds(-30), Kind = LogEventKind.Alerta, Message = "Condição anormal detectada", OrderIndex = 0 },
@@ -217,20 +211,48 @@ public static partial class DbSeeder
         };
     }
 
-    private static List<SnapshotSeries> BuildSnapshotSeries()
+    /// <summary>
+    /// A 60-second multi-signal failure snapshot with realistic, visually-distinct curves (so the chart shows
+    /// seven different shapes, not seven parallel straight lines). Each signal has its own characteristic
+    /// profile plus a fault signature near the end (over-temp spike, over-current spike, voltage sag, fan
+    /// trip); <paramref name="seed"/> varies the ripple phase, where the anomaly starts and how severe it is,
+    /// so different errors look different.
+    /// </summary>
+    private static List<SnapshotSeries> BuildSnapshotSeries(int seed)
     {
+        double V(int salt) => Hash($"{seed}:{salt}") % 1000 / 1000.0;
+        var ph = V(1) * 6.2832;             // ripple phase shift
+        var faultPos = 0.70 + 0.20 * V(2);  // where the anomaly kicks in (70–90% of the window)
+        var sev = 0.6 + 0.8 * V(3);         // anomaly severity
+
         double[] Gen(Func<double, double> f) =>
             Enumerable.Range(0, SnapshotSamples).Select(k => Math.Round(f(k / (double)(SnapshotSamples - 1)), 1)).ToArray();
+        double Fault(double x) => x < faultPos ? 0 : (x - faultPos) / (1 - faultPos); // 0 → 1 after faultPos
+        double Ripple(double x, double freq) => Math.Sin(x * freq + ph);
 
         return
         [
-            new() { Name = "Temp. Grelha", Unit = "°C", Color = "#fbbf24", Values = Gen(x => 30 + 240 * x + (x > 0.85 ? 60 * (x - 0.85) / 0.15 : 0)) },
-            new() { Name = "Temp. Dissipador", Unit = "°C", Color = "#a78bfa", Values = Gen(x => 35 + 50 * x) },
-            new() { Name = "Corrente", Unit = "A", Color = "#f87171", Values = Gen(x => 2 + 12 * x) },
-            new() { Name = "Tensão", Unit = "V", Color = "#22d3ee", Values = Gen(x => 30 + 150 * x) },
-            new() { Name = "Fan Forno", Unit = "rpm", Color = "#f472b6", Values = Gen(x => 2000 + 3000 * x) },
-            new() { Name = "Fan Diss.", Unit = "rpm", Color = "#34d399", Values = Gen(x => 2500 + 2500 * x) },
-            new() { Name = "Alvo", Unit = "°C", Color = "#93c5fd", Values = Gen(x => 30 + 230 * x) },
+            // Oven temp: S-curve toward peak, then an over-temp spike at the fault.
+            new() { Name = "Temp. Grelha", Unit = "°C", Color = "#fbbf24",
+                Values = Gen(x => 235 + 25 * Math.Tanh(4 * (x - 0.4)) + 35 * sev * Fault(x) + 2 * Ripple(x, 9)) },
+            // Heatsink temp: slow, lagging rise.
+            new() { Name = "Temp. Dissipador", Unit = "°C", Color = "#a78bfa",
+                Values = Gen(x => 60 + 45 * x * x + 10 * sev * Fault(x)) },
+            // Current: PWM-ish ripple around the mean, with an over-current spike at the fault.
+            new() { Name = "Corrente", Unit = "A", Color = "#f87171",
+                Values = Gen(x => Math.Max(0, 12 + 3 * Ripple(x, 22) + 11 * sev * Fault(x))) },
+            // Voltage: nominal with mains ripple and a sag at the fault.
+            new() { Name = "Tensão", Unit = "V", Color = "#22d3ee",
+                Values = Gen(x => 127 + 2 * Ripple(x, 30) - 18 * sev * Fault(x)) },
+            // Oven fan: spins up with temperature, then trips/drops at the fault.
+            new() { Name = "Fan Forno", Unit = "rpm", Color = "#f472b6",
+                Values = Gen(x => 2200 + 2600 * Math.Min(1.0, x / faultPos) - 1600 * sev * Fault(x)) },
+            // Heatsink fan: a steadier ramp with its own ripple (distinct from the oven fan).
+            new() { Name = "Fan Diss.", Unit = "rpm", Color = "#34d399",
+                Values = Gen(x => 2600 + 2100 * x + 150 * Ripple(x, 12)) },
+            // Target setpoint: held near peak with a tiny droop (almost flat — the reference line).
+            new() { Name = "Alvo", Unit = "°C", Color = "#93c5fd",
+                Values = Gen(x => 245 - 5 * x) },
         ];
     }
 
@@ -263,7 +285,7 @@ public static partial class DbSeeder
             EndAt = started.AddSeconds(faultAtT),
             InputVoltage = 127,
             OutputVoltage = 150,
-            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries() },
+            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries(101) },
             Events = [new() { At = started.AddSeconds(faultAtT), Kind = LogEventKind.Falha, Message = fault.Message, OrderIndex = 0 }],
         };
         db.Errors.Add(error);
@@ -298,7 +320,7 @@ public static partial class DbSeeder
             LinkedErrorId = error.Id,
             CreatedAt = error.At,
             Points = points,
-            Trace = new FailureSnapshot { DurationSec = faultAtT, Series = BuildSnapshotSeries() },
+            Trace = new FailureSnapshot { DurationSec = faultAtT, Series = BuildSnapshotSeries(202) },
             Events =
             [
                 new() { At = started, Kind = LogEventKind.Info, Message = "Execução iniciada", OrderIndex = 0 },
