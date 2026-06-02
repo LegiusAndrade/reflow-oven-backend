@@ -436,6 +436,27 @@ Se aparecer _"role already exists"_, troque a 1ª linha por `ALTER ROLE reflow W
 Rode `dotnet run` de novo — a aplicação cria as tabelas e popula o seed sozinha. Usuário/senha/banco
 devem bater com a _connection string_ em `appsettings.json`.
 
+### `42501: permission denied to create database`
+Aparece quando o banco `reflowoven` **não existe** (foi dropado, ou nunca criado) e o app tenta criá-lo no
+startup. Por padrão o papel `reflow` **não tem `CREATEDB`** — e isso é **de propósito** (princípio do menor
+privilégio): a aplicação só precisa **ler/gravar dados**, não criar bancos. Se as credenciais do app vazarem,
+o estrago fica limitado àquele banco — ninguém cria/dropa outros bancos nem vira superusuário. Criar o banco
+é tarefa de **provisionamento, feita uma vez** por um superusuário, não pelo app em runtime.
+
+Duas saídas (ambas pelo superusuário):
+```bash
+# (a) recriar só o banco — mantém o reflow SEM CREATEDB (espelha produção):
+sudo -u postgres psql -c "CREATE DATABASE reflowoven OWNER reflow;"
+
+# (b) OU dar CREATEDB ao reflow — cômodo em dev: o app passa a recriar/dropar o próprio banco à vontade:
+sudo -u postgres psql -c "ALTER ROLE reflow CREATEDB;"
+```
+Depois rode `dotnet run` — ele cria/migra/semeia sozinho. **Em produção**, prefira **(a)** e mantenha o papel
+do app **sem** `CREATEDB` (o banco é provisionado pelo ops). Para reverter (b): `ALTER ROLE reflow NOCREATEDB`.
+
+> O `sudo` precisa de um terminal de verdade (ele pergunta sua senha). Se você tentar pelo prefixo `!` de
+> algum assistente e vier `sudo: a terminal is required to read the password`, rode no seu terminal normal.
+
 ### Logs que ASSUSTAM mas são NORMAIS no primeiro start
 - `fail: ... Failed executing DbCommand ... SELECT ... FROM "__EFMigrationsHistory"` — o EF tenta ler a
   tabela que controla as migrations; num banco vazio ela ainda não existe, então ele **cria e segue**. Esperado.
