@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
-public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master)
+public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds)
 {
     /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
     /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
@@ -80,17 +80,17 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         await db.Programs.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
         db.Programs.Add(Defaults.FactoryProgram());
 
-        // Single admin.
-        var admin = Defaults.FactoryAdmin();
+        // Single Admin — config-driven (Admin__*), same as the initial seed.
         db.Users.Add(new User
         {
             Id = Guid.NewGuid(),
-            Name = admin.Name,
-            Email = admin.Email,
-            PasswordHash = hasher.Hash(Defaults.DefaultDevPassword),
-            Type = admin.Type,
-            Status = admin.Status,
+            Name = adminCreds.Username,
+            Email = adminCreds.Email,
+            PasswordHash = hasher.Hash(adminCreds.Password),
+            Type = UserType.Admin,
+            Status = UserStatus.Ativo,
             CreatedAt = clock.UtcNow,
+            MustChangePassword = false,
         });
 
         // The dev Master superuser survives the reset (it was wiped with the rest above, so recreate it).

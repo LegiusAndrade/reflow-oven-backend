@@ -125,17 +125,13 @@ public static class Defaults
     // --- Users (dev parity; password is hashed by the seeder) -----------------------------
     public sealed record SeedUser(string Name, string Email, UserType Type, UserStatus Status);
 
-    // Usernames must satisfy DomainConstants.UserNameRegex (letters/digits . _ - only — no spaces/specials).
+    // The Admin and the first Regular are now config-driven (Admin__* / Regular__*, like the Master), so they
+    // are NOT here; these are the extra dev operators. Usernames must satisfy DomainConstants.UserNameRegex.
     public static List<SeedUser> Users() =>
     [
-        new("lucas.silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo),
-        new("vanessa", "vanessa@reflow.local", UserType.Regular, UserStatus.Ativo),
         new("operador1", "op1@reflow.local", UserType.Regular, UserStatus.Ativo),
         new("operador2", "op2@reflow.local", UserType.Regular, UserStatus.Inativo),
     ];
-
-    /// <summary>The single Admin kept after a factory reset.</summary>
-    public static SeedUser FactoryAdmin() => new("lucas.silva", "lucas@reflow.local", UserType.Admin, UserStatus.Ativo);
 
     /// <summary>Builds the single dev <c>Master</c> superuser row from config-bound credentials. Shared by
     /// the first-run seeder and the factory reset so the Master always exists (and survives a reset).

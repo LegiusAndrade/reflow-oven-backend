@@ -191,7 +191,8 @@ using (var scope = app.Services.CreateScope())
 
     // Migrate (creating the DB + logging a Warning when it doesn't exist yet on a fresh PC), then seed.
     await ReflowOven.Api.StartupDiagnostics.MigrateAndLogAsync(db, app.Logger);
-    await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock, sp.GetRequiredService<IMasterCredentials>());
+    await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock,
+        sp.GetRequiredService<IMasterCredentials>(), sp.GetRequiredService<IAdminCredentials>(), sp.GetRequiredService<IRegularCredentials>());
     if (app.Configuration.GetValue<bool>("Seed:Demo"))
         await DbSeeder.SeedDemoAsync(db, clock);
 

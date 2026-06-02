@@ -42,6 +42,11 @@ public static class DependencyInjection
         services.Configure<MasterOptions>(config.GetSection(MasterOptions.Section));
         services.AddSingleton<IMasterCredentials, MasterCredentials>();
 
+        services.Configure<AdminOptions>(config.GetSection(AdminOptions.Section));
+        services.AddSingleton<IAdminCredentials, AdminCredentials>();
+        services.Configure<RegularOptions>(config.GetSection(RegularOptions.Section));
+        services.AddSingleton<IRegularCredentials, RegularCredentials>();
+
         services.Configure<EmailOptions>(config.GetSection(EmailOptions.Section));
         var emailMode = config.GetSection(EmailOptions.Section)["Mode"];
         if (string.Equals(emailMode, "Smtp", StringComparison.OrdinalIgnoreCase))
