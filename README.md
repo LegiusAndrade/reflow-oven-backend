@@ -55,9 +55,10 @@ requisição HTTP são logados no **console** via **Serilog**.
 
 Os valores em `appsettings.json` (senha do banco, `Jwt:SigningKey` com `dev-only-change-me…`, e as senhas
 do técnico e do Master) são **placeholders de desenvolvimento**. Em produção, sobreponha-os por variáveis de
-ambiente (o .NET mapeia `Section__Key` → `Section:Key`). Copie **[`.env.example`](.env.example)** para `.env`
-(gitignored) e preencha com segredos reais — o `Program.cs` **carrega o `.env` automaticamente** no startup
-(uma variável de ambiente real tem prioridade sobre o arquivo). Como alternativa, exporte-os no seu gerenciador de serviço.
+ambiente (o .NET mapeia `Section__Key` → `Section:Key`) ou exporte-as no gerenciador de serviço. Em
+desenvolvimento, os segredos reais ficam **direto no `appsettings.json` local**: o filtro de limpeza do git
+**`secretscrub`** (rode `scripts/setup_git_scrub.sh` uma vez por clone) reseta todos eles para os placeholders
+antes de qualquer commit, então o repositório nunca vê os valores reais. **Não há mais `.env`.**
 
 O `Program.cs` **falha ao subir** (fail-fast) fora de `Development` se qualquer um destes continuar no padrão:
 
@@ -70,7 +71,7 @@ Defina também `ASPNETCORE_ENVIRONMENT=Production` (em `Development` os fail-fas
 real (onboarding / recuperação / aviso de senha vencida), configure `Email__Mode=Smtp` + credenciais — há um
 **passo a passo (inclusive Gmail)** em
 [`docs/GUIA-DO-PROJETO.md`](./docs/GUIA-DO-PROJETO.md#7-configurar-o-e-mail-smtp), e a lista completa de
-variáveis no `.env.example`.
+chaves na seção `Email` do `appsettings.json`.
 
 ## 🛠️ Solução de problemas (perrengues comuns)
 

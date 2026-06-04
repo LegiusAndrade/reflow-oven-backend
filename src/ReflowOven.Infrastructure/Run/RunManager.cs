@@ -15,6 +15,7 @@ public sealed class RunManager(
     IPowerBoard board,
     ITelemetrySink sink,
     ISystemLogSink systemLog,
+    INotificationSink notifications,
     IClock clock,
     ILogger<RunManager> logger) : IRunManager
 {
@@ -266,11 +267,17 @@ public sealed class RunManager(
             }
 
             db.Executions.Add(report);
-            db.Notifications.Add(new Notification
+            var notification = new Notification
             {
                 Id = Guid.NewGuid(),
                 At = endedAt,
-                Kind = status == RunStatus.Done ? NotificationFeedKind.Info : NotificationFeedKind.Error,
+                // Concluída → info, abortada → warning (âmbar no front), falha → error.
+                Kind = status switch
+                {
+                    RunStatus.Done => NotificationFeedKind.Info,
+                    RunStatus.Aborted => NotificationFeedKind.Warning,
+                    _ => NotificationFeedKind.Error,
+                },
                 Title = closingMessage,
                 Message = status switch
                 {
@@ -278,7 +285,8 @@ public sealed class RunManager(
                     RunStatus.Aborted => $"'{run.ProgramName}' foi abortada após {duration}s.",
                     _ => $"'{run.ProgramName}' falhou após {duration}s ({fault?.Code ?? "sem código"}).",
                 },
-            });
+            };
+            db.Notifications.Add(notification);
             audit.Record(OperationType.Execucao, OperationObject.Execucao, run.RunId.ToString(),
                 [OperationField.Of("status", execStatus), OperationField.Of("duracao_s", duration), OperationField.Of("pico_C", report.PeakTemp)],
                 operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
@@ -287,6 +295,7 @@ public sealed class RunManager(
                     [OperationField.Of("codigo", fa.Code), OperationField.Of("motivo", fa.Message)],
                     operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
             await db.SaveChangesAsync(ct);
+            await notifications.PublishAsync(NotificationDto.From(notification));
         }
 
         _active = null;

@@ -28,12 +28,11 @@ public static partial class DbSeeder
         }
 
         // Accounts. The Admin and the first Regular are config-driven (set real creds via Admin__*/Regular__*
-        // in production); the dev operators come from Defaults. Each is idempotent by username, so they also
-        // land on an already-seeded DB (like the Master below), not just a fresh one.
+        // in production). Each is idempotent by username, so they also land on an already-seeded DB (like the
+        // Master below), not just a fresh one. The extra dev operators (operador1/operador2) are demo-only —
+        // seeded by SeedDemoAsync (gated by Seed:Demo), so production gets ONLY Admin/Regular/Master.
         await SeedAccountAsync(db, hasher, clock, admin.Username, admin.Email, admin.Password, UserType.Admin, UserStatus.Ativo, ct);
         await SeedAccountAsync(db, hasher, clock, regular.Username, regular.Email, regular.Password, UserType.Regular, UserStatus.Ativo, ct);
-        foreach (var u in Defaults.Users())
-            await SeedAccountAsync(db, hasher, clock, u.Name, u.Email, Defaults.DefaultDevPassword, u.Type, u.Status, ct);
 
         // The single dev Master superuser — a config-driven account. Create it if missing; otherwise keep its
         // credentials in sync with config/env on each startup, so changing Master__* (e.g. via .env) and

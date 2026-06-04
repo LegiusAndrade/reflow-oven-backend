@@ -348,9 +348,9 @@ export Email__Smtp__Password="abcd efgh ijkl mnop"   # a senha de app de 16 cara
 export Email__Smtp__From="voce@gmail.com"
 ```
 
-Em produção, o caminho recomendado é copiar **[`.env.example`](../.env.example)** para `.env` (que é
-**gitignored**) e preencher os campos `Email__*` ali — veja a seção "🔐 Segredos em produção" do
-[`README.md`](../README.md).
+Em produção, exporte essas variáveis no gerenciador de serviço; em desenvolvimento, preencha os campos
+`Email:Smtp:*` direto no `appsettings.json` local (o filtro `secretscrub` os mantém fora do git) — veja a
+seção "🔐 Segredos em produção" do [`README.md`](../README.md).
 
 > Em desenvolvimento dá para usar o cofre de segredos do .NET, mas ele **não vem configurado** neste
 > projeto: rode `dotnet user-secrets init -p src/ReflowOven.Api` **uma vez** antes de

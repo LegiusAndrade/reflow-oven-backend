@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<SystemLogService>();
         // Fallback no-op push sink; the Api layer overrides this with the SignalR implementation.
         services.TryAddSingleton<ISystemLogSink, NullSystemLogSink>();
+        services.TryAddSingleton<INotificationSink, NullNotificationSink>();
         return services;
     }
 }

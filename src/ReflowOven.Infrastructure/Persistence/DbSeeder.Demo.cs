@@ -1,15 +1,23 @@
 namespace ReflowOven.Infrastructure.Persistence;
 
 /// <summary>
-/// Dev-only demo data: populates the history tables (executions, errors, changes, system log) plus
-/// favorites, per-user activity counters and board hour-meters, so the frontend's Relatórios /
-/// Diagnóstico / Informação screens have realistic data. Idempotent (skips a table that already
-/// has rows). Enabled by config `Seed:Demo` (true in Development); never seed this in production.
+/// Dev-only demo data: a LARGE, coherent dataset so every frontend screen has realistic content —
+/// ~200 programs, 120 executions (failures linked to a real error + failure chart), standalone errors,
+/// 200 program/config changes (several on the same program), the universal operation log mirroring all of
+/// it (linked via ObjectId), plus favorites, per-user counters, board hour-meters and a few soft-deleted
+/// rows for the Master's "Lixeira". Idempotent (skips a table that already has rows). Enabled by config
+/// `Seed:Demo` (true in Development); never seed this in production.
 /// </summary>
 public static partial class DbSeeder
 {
     private const int SnapshotSamples = 40;
     private const string EditChurnProgramId = "demo-edit-churn";
+
+    // Scale knobs for the "huge" demo dataset.
+    private const int DemoProgramCount = 150;   // + the ~50 catalog programs ≈ 200 total
+    private const int DemoExecutions = 120;     // ~1 in 4 fails (and links to an error)
+    private const int DemoStandaloneErrors = 20; // extra errors not tied to an execution
+    private const int DemoChanges = 188;        // + the 12-row churn history = 200 changes
 
     private static readonly string[][] ConfigBulletSets =
     [
@@ -17,6 +25,8 @@ public static partial class DbSeeder
         ["Corrente máxima: 8 A → 12 A", "Desligamento por sobretemperatura: ativado"],
         ["Limite do dissipador: 75 °C → 85 °C"],
         ["RS422: 57600 → 115200 bps", "Amostragem: 500 ms → 250 ms"],
+        ["PID P: 12,0 → 14,5", "PID I: 0,80 → 0,65"],
+        ["Tempo extra máximo: 30 s → 45 s"],
     ];
 
     private static readonly (LogLevel Level, string Message)[] SystemLogMessages =
@@ -35,13 +45,29 @@ public static partial class DbSeeder
         (LogLevel.Info, "Configurações salvas"),
     ];
 
-    public static async Task SeedDemoAsync(ReflowDbContext db, IClock clock, CancellationToken ct = default)
+    public static async Task SeedDemoAsync(ReflowDbContext db, IPasswordHasher hasher, IClock clock, CancellationToken ct = default)
     {
         var now = clock.UtcNow;
+
+        // The extra dev operators (operador1/operador2) are demo-only — seeded here, never in production.
+        foreach (var u in Defaults.Users())
+            await SeedAccountAsync(db, hasher, clock, u.Name, u.Email, Defaults.DefaultDevPassword, u.Type, u.Status, ct);
+        await db.SaveChangesAsync(ct);
+
         var users = await db.Users.OrderBy(u => u.CreatedAt).ToListAsync(ct);
+        if (users.Count == 0) return;
+
+        // --- Bulk demo programs (so the gallery + reports reference ~200 programs) ----------------------
+        if (await db.Programs.CountAsync(ct) < DemoProgramCount)
+        {
+            foreach (var p in BuildDemoPrograms())
+                db.Programs.Add(p);
+            await db.SaveChangesAsync(ct);
+        }
+
         var programs = await db.Programs.OrderBy(p => p.Id).ToListAsync(ct);
         var faults = await db.FaultTypes.OrderBy(f => f.Code).ToListAsync(ct);
-        if (users.Count == 0 || programs.Count == 0) return;
+        if (programs.Count == 0) return;
 
         // Per-user login counts + activity counters.
         for (var i = 0; i < users.Count; i++)
@@ -57,33 +83,68 @@ public static partial class DbSeeder
         // Favorites for the first admin.
         var admin = users.FirstOrDefault(u => u.Type == UserType.Admin) ?? users[0];
         if (!await db.Favorites.AnyAsync(ct))
-            foreach (var p in programs.Take(6))
+            foreach (var p in programs.Take(8))
                 db.Favorites.Add(new FavoriteProgram { UserId = admin.Id, ProgramId = p.Id });
 
+        // Audit-trail rows are accumulated here and added once at the end (mirroring the data below).
+        var ops = new List<OperationLogEntry>();
+        var seedOps = !await db.OperationLog.AnyAsync(ct);
+
+        // --- Executions — a failed run creates a linked ErrorLogEntry so the report deep-links + charts it.
         if (!await db.Executions.AnyAsync(ct))
-            for (var i = 0; i < 20; i++)
-                db.Executions.Add(BuildExecution(i, now, programs, users));
+            for (var i = 0; i < DemoExecutions; i++)
+            {
+                var program = programs[i % programs.Count];
+                var user = users[i % users.Count];
+                var fault = i % 4 == 3 && faults.Count > 0 ? faults[i % faults.Count] : null;
 
-        if (faults.Count > 0 && !await db.Errors.AnyAsync(ct))
-            for (var i = 0; i < 14; i++)
-                db.Errors.Add(BuildError(i, now, faults, programs, users));
+                var (exec, error) = BuildRun(i, now, program, user, fault);
+                if (error is not null)
+                {
+                    db.Errors.Add(error);
+                    ops.Add(OpRow(error.At, user, OperationType.Erro, OperationObject.Falha, error.Id.ToString(),
+                        OperationField.Of("codigo", error.FaultTypeCode), OperationField.Of("motivo", error.Message)));
+                }
+                db.Executions.Add(exec);
+                ops.Add(OpRow(exec.StartedAt, user, OperationType.Execucao, OperationObject.Execucao, exec.Id.ToString(),
+                    OperationField.Of("status", exec.Status), OperationField.Of("duracao_s", exec.DurationSeconds), OperationField.Of("pico_C", exec.PeakTemp)));
+            }
 
-        // Item 4: one failed execution wired to a real ErrorLogEntry via LinkedErrorId so the Execução
-        // detail can deep-link to the Erros report. Idempotent: only when no linked failure exists yet.
-        if (faults.Count > 0 && !await db.Executions.AnyAsync(e => e.LinkedErrorId != null, ct))
-            db.Executions.Add(BuildLinkedFailureExecution(db, now, programs, users, faults));
+        // --- Standalone errors (not tied to an execution), for a fuller Erros report ---------------------
+        if (faults.Count > 0 && await db.Errors.CountAsync(ct) < DemoStandaloneErrors)
+            for (var i = 0; i < DemoStandaloneErrors; i++)
+            {
+                var user = users[i % users.Count];
+                var error = BuildErrorFor(900 + i, now.AddDays(-(i + 1)).AddHours(-(i % 9)),
+                    faults[i % faults.Count], programs[i % programs.Count], user);
+                db.Errors.Add(error);
+                ops.Add(OpRow(error.At, user, OperationType.Erro, OperationObject.Falha, error.Id.ToString(),
+                    OperationField.Of("codigo", error.FaultTypeCode), OperationField.Of("motivo", error.Message)));
+            }
 
+        // --- Changes — 188 generated (program create/edit/remove, clustered so the same program is edited
+        //     several times, plus config changes) + a 12-row churn history = 200 total. -------------------
         if (!await db.Changes.AnyAsync(ct))
         {
-            for (var i = 0; i < 16; i++)
-                db.Changes.Add(BuildChange(i, now, programs, users));
+            for (var i = 0; i < DemoChanges; i++)
+            {
+                var c = BuildChange(i, now, programs, users);
+                db.Changes.Add(c);
+                ops.Add(OpRowForChange(c));
+            }
 
-            // Item J: one program edited ~12 times so the Alterações report shows a rich edit history.
-            // Change history is now unbounded (no pruning), so persist every row (1 Criado + 11 Editado).
             var churnProgram = await SeedEditChurnProgramAsync(db, ct);
             foreach (var c in BuildEditChurnHistory(churnProgram, now, users))
+            {
                 db.Changes.Add(c);
+                ops.Add(OpRowForChange(c));
+            }
         }
+
+        // --- A spread of session/calibration/communication/maintenance audit rows, so every Log de
+        //     Operação sub-tab (and operator "Sistema") has content. ---------------------------------------
+        if (seedOps)
+            ops.AddRange(BuildMiscOperations(now, users));
 
         if (!await db.SystemLog.AnyAsync(ct))
             for (var i = 0; i < 45; i++)
@@ -92,19 +153,88 @@ public static partial class DbSeeder
                 db.SystemLog.Add(new SystemLogEntry { At = now.AddMinutes(-(45 - i) * 7), Level = level, Message = message });
             }
 
+        // --- A few notifications, with a couple soft-deleted for the Master's Lixeira --------------------
+        if (!await db.Notifications.AnyAsync(ct))
+            foreach (var n in BuildNotifications(now))
+                db.Notifications.Add(n);
+
+        // --- Soft-delete a handful of demo programs + one demo operator so the Lixeira isn't empty -------
+        var deletedBy = users.FirstOrDefault(u => u.Type == UserType.Master)?.Name ?? admin.Name;
+        foreach (var p in programs.Where(p => !p.IsDeleted && p.Id.StartsWith("demo-prog-")).TakeLast(8))
+        {
+            p.IsDeleted = true;
+            p.DeletedAt = now.AddDays(-(Hash(p.Id) % 20 + 1));
+            p.DeletedBy = deletedBy;
+        }
+        var operador = users.FirstOrDefault(u => u.Name == "operador2" && !u.IsDeleted);
+        if (operador is not null)
+        {
+            operador.IsDeleted = true;
+            operador.DeletedAt = now.AddDays(-3);
+            operador.DeletedBy = deletedBy;
+        }
+
         foreach (var b in await db.Boards.ToListAsync(ct))
             if (b.Hours == 0)
                 b.Hours = b.Role == BoardRole.Power ? 842 : 1287;
 
+        if (seedOps && ops.Count > 0)
+            db.OperationLog.AddRange(ops);
+
         await db.SaveChangesAsync(ct);
     }
 
-    private static ExecutionReport BuildExecution(int i, DateTimeOffset now, List<ReflowProgram> programs, List<User> users)
+    // --- Demo programs ----------------------------------------------------------------------------------
+
+    /// <summary>A batch of reflow-shaped demo programs (non-seed, so they show in the gallery), varied by a
+    /// deterministic hash of the index. IDs are <c>demo-prog-N</c>.</summary>
+    private static IEnumerable<ReflowProgram> BuildDemoPrograms()
     {
-        var program = programs[i % programs.Count];
-        var user = users[i % users.Count];
-        var failed = i % 5 == 4;
-        var startedAt = now.AddDays(-(i + 1)).AddHours(-(i % 6));
+        string[] types = ["SMD", "BGA", "QFN", "Sem Chumbo", "Cura", "Reballing", "Teste", "Pré-aquec.", "Protótipo", "Linha"];
+        for (var i = 0; i < DemoProgramCount; i++)
+        {
+            var peak = 100 + Hash($"dp{i}") % 180;      // 100–279 °C
+            var totalSec = 260 + Hash($"ds{i}") % 360;  // 260–619 s
+            yield return new ReflowProgram
+            {
+                Id = $"demo-prog-{i + 1}",
+                Name = $"{types[i % types.Length]} {peak}°C #{i + 1}",
+                Description = i % 3 == 0 ? $"Perfil de demonstração ({types[i % types.Length]})." : null,
+                RunCount = Hash($"dr{i}") % 60,
+                LastUsed = null,
+                IsSeed = false,
+                Profile = DemoProfile(peak, totalSec),
+            };
+        }
+    }
+
+    /// <summary>A reflow curve (8 points) from a peak/duration; the t=0 baseline stays at 0 °C, every other
+    /// point is raised to the entry floor — same rule the catalog and editor use.</summary>
+    private static List<ProfilePoint> DemoProfile(double peak, double totalSec)
+    {
+        ProfilePoint P(double frac, double temp) => new()
+        {
+            T = Math.Round(totalSec * frac),
+            Temp = Math.Max(DomainConstants.PointTempMin, Math.Round(temp)),
+        };
+        return
+        [
+            new() { T = 0, Temp = 0 },
+            P(0.2, peak * 0.55), P(0.42, peak * 0.7), P(0.55, peak * 0.85),
+            P(0.62, peak), P(0.72, peak * 0.8), P(0.86, peak * 0.45), P(1, 40),
+        ];
+    }
+
+    // --- Executions + errors ----------------------------------------------------------------------------
+
+    /// <summary>Builds one execution; when <paramref name="fault"/> is non-null the run failed, and a matching
+    /// <see cref="ErrorLogEntry"/> is created and linked (LinkedErrorId/FaultTypeCode/FailureReason) so the
+    /// Execução detail deep-links to the Erros report and both render the multi-signal failure chart.</summary>
+    private static (ExecutionReport exec, ErrorLogEntry? error) BuildRun(
+        int i, DateTimeOffset now, ReflowProgram program, User user, FaultType? fault)
+    {
+        var failed = fault is not null;
+        var startedAt = now.AddDays(-(i % 45 + 1)).AddHours(-(i % 6)).AddMinutes(-(i % 47));
         var profile = program.Profile;
         var total = profile.Count > 0 ? (int)Math.Round(profile[^1].T) : 300;
         var peakTemp = profile.Count > 0 ? (int)Math.Round(profile.Max(p => p.Temp)) : 250;
@@ -114,7 +244,7 @@ public static partial class DbSeeder
             points.Add(new ExecProfilePoint { T = (int)Math.Round(p.T), Temp = (int)Math.Round(p.Temp), Kind = ProfileRole.Programmed });
 
         var cut = failed ? Math.Max(2, (int)(profile.Count * 0.62)) : profile.Count;
-        for (var k = 0; k < cut; k++)
+        for (var k = 0; k < cut && k < profile.Count; k++)
         {
             var p = profile[k];
             var drift = Hash($"{i}-m{k}") % 9 - 4;
@@ -136,28 +266,49 @@ public static partial class DbSeeder
             var prev = profile[k - 1];
             var cur = profile[k];
             var segSec = (int)Math.Round(cur.T - prev.T);
-            var dT = Hash($"{i}-c{k}") % 9 - 4;
-            var dS = Hash($"{i}-s{k}") % 7 - 3;
             comparison.Add(new ProfileComparisonRow
             {
                 TempProg = (int)Math.Round(cur.Temp),
-                TempReal = (int)Math.Round(cur.Temp) + dT,
+                TempReal = (int)Math.Round(cur.Temp) + (Hash($"{i}-c{k}") % 9 - 4),
                 TimeProgSeconds = segSec,
-                TimeRealSeconds = Math.Max(1, segSec + dS),
+                TimeRealSeconds = Math.Max(1, segSec + (Hash($"{i}-s{k}") % 7 - 3)),
                 StageIndex = k,
             });
         }
 
         var duration = failed && faultAtT.HasValue ? faultAtT.Value : total;
-        var events = new List<LogEvent>
-        {
-            new() { At = startedAt, Kind = LogEventKind.Info, Message = "Execução iniciada", OrderIndex = 0 },
-            failed
-                ? new() { At = startedAt.AddSeconds(duration), Kind = LogEventKind.Falha, Message = "Falha durante a execução", OrderIndex = 1 }
-                : new() { At = startedAt.AddSeconds(duration), Kind = LogEventKind.Info, Message = "Execução concluída", OrderIndex = 1 },
-        };
+        var endedAt = startedAt.AddSeconds(duration);
 
-        return new ExecutionReport
+        ErrorLogEntry? error = null;
+        if (failed)
+        {
+            error = new ErrorLogEntry
+            {
+                Id = Guid.NewGuid(),
+                At = endedAt,
+                FaultTypeCode = fault!.Code,
+                Severity = fault.Severity,
+                Message = fault.Message,
+                UserId = user.Id,
+                UserName = user.Name,
+                ProgramId = program.Id,
+                ProgramName = program.Name,
+                OvenTemp = faultAtTemp ?? peakTemp,
+                PcbTemp = 55 + Hash($"pt{i}") % 35,
+                StartAt = startedAt,
+                EndAt = endedAt,
+                InputVoltage = 120 + Hash($"iv{i}") % 14,
+                OutputVoltage = 130 + Hash($"ov{i}") % 60,
+                Snapshot = new FailureSnapshot { DurationSec = duration, Series = BuildSnapshotSeries(7 * i + 13, faulted: true) },
+                Events =
+                [
+                    new() { At = startedAt.AddSeconds(duration * 0.5), Kind = LogEventKind.Alerta, Message = "Condição anormal detectada", OrderIndex = 0 },
+                    new() { At = endedAt, Kind = LogEventKind.Falha, Message = fault.Message, OrderIndex = 1 },
+                ],
+            };
+        }
+
+        var exec = new ExecutionReport
         {
             Id = Guid.NewGuid(),
             ProgramId = program.Id,
@@ -168,51 +319,53 @@ public static partial class DbSeeder
             DurationSeconds = duration,
             Status = failed ? ExecutionStatus.Falha : ExecutionStatus.Concluido,
             PeakTemp = peakTemp,
-            PeakCurrent = Math.Round(10m + Hash($"pc{i}") % 50 / 10m, 1),
+            PeakCurrent = Math.Round(10m + Hash($"pc{i}") % 90 / 10m, 1),
             FaultAtT = faultAtT,
             FaultAtTemp = faultAtTemp,
-            CreatedAt = startedAt.AddSeconds(duration),
+            FailureReason = error?.Message,
+            FaultTypeCode = error?.FaultTypeCode,
+            LinkedErrorId = error?.Id,
+            CreatedAt = endedAt,
             Points = points,
             Comparison = comparison,
-            // Multi-signal trace so the Execução detail renders a chart (a clean shape for a successful run,
-            // a fault signature for a failed one) — real runs get this from RunManager; the demo lacked it.
+            // Multi-signal trace so the Execução detail renders a chart — a clean shape for a successful run,
+            // a fault signature for a failed one (the same snapshot the Erros report uses).
             Trace = new FailureSnapshot { DurationSec = duration, Series = BuildSnapshotSeries(7 * i + 13, faulted: failed) },
-            Events = events,
-        };
-    }
-
-    private static ErrorLogEntry BuildError(int i, DateTimeOffset now, List<FaultType> faults, List<ReflowProgram> programs, List<User> users)
-    {
-        var ft = faults[i % faults.Count];
-        var program = programs[i % programs.Count];
-        var user = users[i % users.Count];
-        var at = now.AddDays(-(i + 1)).AddHours(-(i % 9));
-
-        return new ErrorLogEntry
-        {
-            Id = Guid.NewGuid(),
-            At = at,
-            FaultTypeCode = ft.Code,
-            Severity = ft.Severity,
-            Message = ft.Message,
-            UserId = user.Id,
-            UserName = user.Name,
-            ProgramId = program.Id,
-            ProgramName = program.Name,
-            OvenTemp = 180 + Hash($"ot{i}") % 90,
-            PcbTemp = 45 + Hash($"pt{i}") % 40,
-            StartAt = at.AddSeconds(-60),
-            EndAt = at,
-            InputVoltage = 120 + Hash($"iv{i}") % 14,
-            OutputVoltage = Hash($"ov{i}") % 180,
-            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries(i) },
             Events =
             [
-                new() { At = at.AddSeconds(-30), Kind = LogEventKind.Alerta, Message = "Condição anormal detectada", OrderIndex = 0 },
-                new() { At = at, Kind = LogEventKind.Falha, Message = ft.Message, OrderIndex = 1 },
+                new() { At = startedAt, Kind = LogEventKind.Info, Message = "Execução iniciada", OrderIndex = 0 },
+                failed
+                    ? new() { At = endedAt, Kind = LogEventKind.Falha, Message = $"Falha: {fault!.Message}", OrderIndex = 1 }
+                    : new() { At = endedAt, Kind = LogEventKind.Info, Message = "Execução concluída", OrderIndex = 1 },
             ],
         };
+        return (exec, error);
     }
+
+    private static ErrorLogEntry BuildErrorFor(int seed, DateTimeOffset at, FaultType ft, ReflowProgram program, User user) => new()
+    {
+        Id = Guid.NewGuid(),
+        At = at,
+        FaultTypeCode = ft.Code,
+        Severity = ft.Severity,
+        Message = ft.Message,
+        UserId = user.Id,
+        UserName = user.Name,
+        ProgramId = program.Id,
+        ProgramName = program.Name,
+        OvenTemp = 180 + Hash($"ot{seed}") % 90,
+        PcbTemp = 45 + Hash($"pt{seed}") % 40,
+        StartAt = at.AddSeconds(-60),
+        EndAt = at,
+        InputVoltage = 120 + Hash($"iv{seed}") % 14,
+        OutputVoltage = Hash($"ov{seed}") % 180,
+        Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries(seed) },
+        Events =
+        [
+            new() { At = at.AddSeconds(-30), Kind = LogEventKind.Alerta, Message = "Condição anormal detectada", OrderIndex = 0 },
+            new() { At = at, Kind = LogEventKind.Falha, Message = ft.Message, OrderIndex = 1 },
+        ],
+    };
 
     /// <summary>
     /// A 60-second multi-signal failure snapshot with realistic, visually-distinct curves (so the chart shows
@@ -237,105 +390,105 @@ public static partial class DbSeeder
 
         return
         [
-            // Oven temp: S-curve toward peak, then an over-temp spike at the fault.
             new() { Name = "Temp. Grelha", Unit = "°C", Color = "#fbbf24",
                 Values = Gen(x => 235 + 25 * Math.Tanh(4 * (x - 0.4)) + 35 * sev * Fault(x) + 2 * Ripple(x, 9)) },
-            // Heatsink temp: slow, lagging rise.
             new() { Name = "Temp. Dissipador", Unit = "°C", Color = "#a78bfa",
                 Values = Gen(x => 60 + 45 * x * x + 10 * sev * Fault(x)) },
-            // Current: PWM-ish ripple around the mean, with an over-current spike at the fault.
             new() { Name = "Corrente", Unit = "A", Color = "#f87171",
                 Values = Gen(x => Math.Max(0, 12 + 3 * Ripple(x, 22) + 11 * sev * Fault(x))) },
-            // Voltage: nominal with mains ripple and a sag at the fault.
             new() { Name = "Tensão", Unit = "V", Color = "#22d3ee",
                 Values = Gen(x => 127 + 2 * Ripple(x, 30) - 18 * sev * Fault(x)) },
-            // Oven fan: spins up with temperature, then trips/drops at the fault.
             new() { Name = "Fan Forno", Unit = "rpm", Color = "#f472b6",
                 Values = Gen(x => 2200 + 2600 * Math.Min(1.0, x / faultPos) - 1600 * sev * Fault(x)) },
-            // Heatsink fan: a steadier ramp with its own ripple (distinct from the oven fan).
             new() { Name = "Fan Diss.", Unit = "rpm", Color = "#34d399",
                 Values = Gen(x => 2600 + 2100 * x + 150 * Ripple(x, 12)) },
-            // Target setpoint: held near peak with a tiny droop (almost flat — the reference line).
             new() { Name = "Alvo", Unit = "°C", Color = "#93c5fd",
                 Values = Gen(x => 245 - 5 * x) },
         ];
     }
 
-    /// <summary>Item 4: a failed execution joined to a freshly-created ErrorLogEntry via
-    /// LinkedErrorId/FaultTypeCode, so the Execução detail can deep-link to the Erros report.</summary>
-    private static ExecutionReport BuildLinkedFailureExecution(
-        ReflowDbContext db, DateTimeOffset now, List<ReflowProgram> programs, List<User> users, List<FaultType> faults)
+    // --- Changes ----------------------------------------------------------------------------------------
+
+    private static ChangeLogEntry BuildChange(int i, DateTimeOffset now, List<ReflowProgram> programs, List<User> users)
     {
-        var program = programs[0];
-        var user = users[0];
-        var fault = faults.FirstOrDefault(f => f.Severity == ErrorSeverity.Critico) ?? faults[0];
-        var started = now.AddHours(-3);
-        var faultAtT = program.Profile.Count > 1 ? (int)Math.Round(program.Profile[^1].T) / 2 : 120;
-        var peak = program.Profile.Count > 0 ? (int)Math.Round(program.Profile.Max(p => p.Temp)) : 240;
+        var user = users[i % users.Count];
+        var at = now.AddDays(-(i % 60 + 1)).AddHours(-(i % 7)).AddMinutes(-(i % 53));
 
-        var error = new ErrorLogEntry
-        {
-            Id = Guid.NewGuid(),
-            At = started.AddSeconds(faultAtT),
-            FaultTypeCode = fault.Code,
-            Severity = fault.Severity,
-            Message = fault.Message,
-            UserId = user.Id,
-            UserName = user.Name,
-            ProgramId = program.Id,
-            ProgramName = program.Name,
-            OvenTemp = peak,
-            PcbTemp = 72,
-            StartAt = started,
-            EndAt = started.AddSeconds(faultAtT),
-            InputVoltage = 127,
-            OutputVoltage = 150,
-            Snapshot = new FailureSnapshot { DurationSec = 60, Series = BuildSnapshotSeries(101) },
-            Events = [new() { At = started.AddSeconds(faultAtT), Kind = LogEventKind.Falha, Message = fault.Message, OrderIndex = 0 }],
-        };
-        db.Errors.Add(error);
+        // Every 4th row is a system-configuration change (varied bullet sets).
+        if (i % 4 == 1)
+            return new ChangeLogEntry
+            {
+                Id = Guid.NewGuid(),
+                At = at,
+                Action = ChangeAction.Editado,
+                Target = "Configuração do sistema",
+                UserId = user.Id,
+                UserName = user.Name,
+                DetailKind = ChangeDetailKind.Config,
+                ConfigBullets = [.. ConfigBulletSets[i % ConfigBulletSets.Length]],
+            };
 
-        // Curve: the programmed points + the measured points up to the fault.
-        var points = new List<ExecProfilePoint>();
-        foreach (var p in program.Profile)
-            points.Add(new ExecProfilePoint { T = (int)Math.Round(p.T), Temp = (int)Math.Round(p.Temp), Kind = ProfileRole.Programmed });
-        var cut = Math.Max(2, (int)(program.Profile.Count * 0.62));
-        for (var k = 0; k < cut && k < program.Profile.Count; k++)
+        var action = (ChangeAction)(i % 3); // Criado | Editado | Removido
+        // Cluster program changes onto a small pool so the same program is edited several times (rich history).
+        var program = programs[Hash($"chg{i}") % Math.Min(programs.Count, 40)];
+        var curve = program.Profile.Skip(1).Take(8).ToList();
+
+        List<ChangePointRow> Rows(ChangePointRole role) =>
+            [.. curve.Select((p, k) => new ChangePointRow
+            {
+                Index = k + 1,
+                Temp = (int)Math.Round(p.Temp),
+                TimeSec = (int)Math.Round(p.T),
+                Ramp = RampShape.Linear,
+                Role = role,
+            })];
+
+        // Editado shows a real per-point diff so the Alterações screen exercises every role: point 1
+        // unchanged, the middle points changed (previous ~8 °C cooler), the last removed, plus one appended.
+        List<ChangePointRow> EditDiff()
         {
-            var p = program.Profile[k];
-            points.Add(new ExecProfilePoint { T = (int)Math.Round(p.T), Temp = Math.Max(20, (int)Math.Round(p.Temp) - 3), Kind = ProfileRole.Measured });
+            var diff = new List<ChangePointRow>();
+            for (var k = 0; k < curve.Count; k++)
+            {
+                var t = (int)Math.Round(curve[k].T);
+                var temp = (int)Math.Round(curve[k].Temp);
+                if (k == 0)
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Unchanged });
+                else if (k == curve.Count - 1)
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Removed });
+                else
+                {
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = Math.Max(0, temp - 8), TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedBefore });
+                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedAfter });
+                }
+            }
+            var lastT = curve.Count > 0 ? (int)Math.Round(curve[^1].T) : 0;
+            diff.Add(new ChangePointRow { Index = curve.Count + 1, Temp = 60, TimeSec = lastT + 30, Ramp = RampShape.Linear, Role = ChangePointRole.Added });
+            return diff;
         }
 
-        return new ExecutionReport
+        var points = action switch
+        {
+            ChangeAction.Criado => Rows(ChangePointRole.Added),
+            ChangeAction.Removido => Rows(ChangePointRole.Removed),
+            _ => EditDiff(),
+        };
+
+        return new ChangeLogEntry
         {
             Id = Guid.NewGuid(),
-            ProgramId = program.Id,
-            ProgramName = program.Name,
+            At = at,
+            Action = action,
+            Target = program.Name,
             UserId = user.Id,
             UserName = user.Name,
-            StartedAt = started,
-            DurationSeconds = faultAtT,
-            Status = ExecutionStatus.Falha,
-            PeakTemp = peak,
-            PeakCurrent = 18m,
-            FaultAtT = faultAtT,
-            FaultAtTemp = peak,
-            FailureReason = fault.Message,
-            FaultTypeCode = fault.Code,
-            LinkedErrorId = error.Id,
-            CreatedAt = error.At,
+            ProgramId = program.Id,
+            DetailKind = ChangeDetailKind.Program,
             Points = points,
-            Trace = new FailureSnapshot { DurationSec = faultAtT, Series = BuildSnapshotSeries(202) },
-            Events =
-            [
-                new() { At = started, Kind = LogEventKind.Info, Message = "Execução iniciada", OrderIndex = 0 },
-                new() { At = error.At, Kind = LogEventKind.Falha, Message = $"Falha: {fault.Message}", OrderIndex = 1 },
-            ],
         };
     }
 
-    /// <summary>Item J: idempotently create the one program whose edit history demonstrates the retention
-    /// cutoff. A normal (non-seed, non-deleted) program so it shows in the gallery and the Alterações report.</summary>
+    /// <summary>Idempotently create the one program whose edit history demonstrates the retention cutoff.</summary>
     private static async Task<ReflowProgram> SeedEditChurnProgramAsync(ReflowDbContext db, CancellationToken ct)
     {
         var existing = await db.Programs.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == EditChurnProgramId, ct);
@@ -365,18 +518,15 @@ public static partial class DbSeeder
         return program;
     }
 
-    /// <summary>
-    /// Item J: 12 program-change rows for one program — 1 Criado + 11 Editado, oldest→newest, each Editado
-    /// nudging two mid-curve points warmer so the per-point diff exercises ChangedBefore/ChangedAfter
-    /// alongside Unchanged. Timestamps strictly increase so the most-recent-N retention cut is deterministic.
-    /// </summary>
+    /// <summary>12 change rows for one program — 1 Criado + 11 Editado, oldest→newest, each nudging two
+    /// mid-curve points warmer so the per-point diff exercises ChangedBefore/ChangedAfter alongside Unchanged.</summary>
     private static List<ChangeLogEntry> BuildEditChurnHistory(ReflowProgram program, DateTimeOffset now, List<User> users)
     {
         var rows = new List<ChangeLogEntry>();
-        var basePts = program.Profile.Skip(1).Take(8).ToList(); // skip the t=0/25 anchor
+        var basePts = program.Profile.Skip(1).Take(8).ToList();
         const int edits = 11;
 
-        DateTimeOffset At(int rev) => now.AddDays(-30).AddHours(rev * 6); // rev 0 oldest, rev 11 newest
+        DateTimeOffset At(int rev) => now.AddDays(-30).AddHours(rev * 6);
 
         ChangeLogEntry Row(int rev, ChangeAction action, List<ChangePointRow> points) => new()
         {
@@ -391,7 +541,6 @@ public static partial class DbSeeder
             Points = points,
         };
 
-        // rev 0: Criado — the whole curve as Added.
         rows.Add(Row(0, ChangeAction.Criado,
             [.. basePts.Select((p, k) => new ChangePointRow
             {
@@ -402,7 +551,6 @@ public static partial class DbSeeder
                 Role = ChangePointRole.Added,
             })]));
 
-        // rev 1..11: Editado — bump points 4 & 5 (peak region) by +rev °C; the rest stay Unchanged.
         for (var rev = 1; rev <= edits; rev++)
         {
             var diff = new List<ChangePointRow>();
@@ -425,82 +573,120 @@ public static partial class DbSeeder
         return rows;
     }
 
-    private static ChangeLogEntry BuildChange(int i, DateTimeOffset now, List<ReflowProgram> programs, List<User> users)
+    // --- Operation log (universal audit trail) ----------------------------------------------------------
+
+    /// <summary>Build one operation-log row. Category is derived from (type, object) exactly like
+    /// <c>AuditService.Record</c> does at runtime, so seeded and live rows are categorised identically.</summary>
+    private static OperationLogEntry OpRow(
+        DateTimeOffset at, User? user, OperationType type, OperationObject obj, string? objectId, params OperationField[] data) => new()
     {
-        var user = users[i % users.Count];
-        var at = now.AddDays(-(i + 1)).AddHours(-(i % 7));
+        Id = Guid.NewGuid(),
+        At = at,
+        OperatorId = user?.Id,
+        OperatorName = user?.Name ?? "Sistema",
+        Category = OpCategory(type, obj),
+        Type = type,
+        Object = obj,
+        ObjectId = objectId,
+        Data = [.. data],
+    };
 
-        if (i % 4 == 1)
-            return new ChangeLogEntry
-            {
-                Id = Guid.NewGuid(),
-                At = at,
-                Action = ChangeAction.Editado,
-                Target = "Configuração do sistema",
-                UserId = user.Id,
-                UserName = user.Name,
-                DetailKind = ChangeDetailKind.Config,
-                ConfigBullets = [.. ConfigBulletSets[i % ConfigBulletSets.Length]],
-            };
+    // Mirror of AuditService.CategoryFor (kept in sync so demo data buckets like the real thing).
+    private static OperationCategory OpCategory(OperationType type, OperationObject obj) => type switch
+    {
+        OperationType.Execucao => OperationCategory.Execucao,
+        OperationType.Erro => OperationCategory.Falha, // a board fault feeds the "Falha" sub-tab
+        OperationType.Comunicacao => OperationCategory.Comunicacao,
+        OperationType.Calibracao => OperationCategory.Calibracao,
+        OperationType.Limpeza or OperationType.ResetFabrica => OperationCategory.Manutencao,
+        OperationType.Login or OperationType.Logout => OperationCategory.Usuario,
+        _ => obj == OperationObject.Usuario ? OperationCategory.Usuario : OperationCategory.Alteracao,
+    };
 
-        var action = (ChangeAction)(i % 3); // Criado | Editado | Removido
-        var program = programs[i % programs.Count];
-        var curve = program.Profile.Skip(1).Take(8).ToList();
-
-        List<ChangePointRow> Rows(ChangePointRole role, int tempDelta) =>
-            [.. curve.Select((p, k) => new ChangePointRow
-            {
-                Index = k + 1,
-                Temp = Math.Max(0, (int)Math.Round(p.Temp) + tempDelta),
-                TimeSec = (int)Math.Round(p.T),
-                Ramp = RampShape.Linear,
-                Role = role,
-            })];
-
-        // Editado shows a real per-point diff so the Alterações screen exercises every role: point 1
-        // unchanged, the middle points changed (previous ~8 °C cooler), the last removed, plus one
-        // appended (added). Criado/Removido carry the single added/removed curve.
-        List<ChangePointRow> EditDiff()
+    /// <summary>An operation-log row mirroring a change, linked to the program (or system config) via ObjectId.</summary>
+    private static OperationLogEntry OpRowForChange(ChangeLogEntry c)
+    {
+        var type = c.Action switch
         {
-            var diff = new List<ChangePointRow>();
-            for (var k = 0; k < curve.Count; k++)
-            {
-                var t = (int)Math.Round(curve[k].T);
-                var temp = (int)Math.Round(curve[k].Temp);
-                if (k == 0)
-                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Unchanged });
-                else if (k == curve.Count - 1)
-                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.Removed });
-                else
-                {
-                    diff.Add(new ChangePointRow { Index = k + 1, Temp = Math.Max(0, temp - 8), TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedBefore });
-                    diff.Add(new ChangePointRow { Index = k + 1, Temp = temp, TimeSec = t, Ramp = RampShape.Linear, Role = ChangePointRole.ChangedAfter });
-                }
-            }
-            var lastT = curve.Count > 0 ? (int)Math.Round(curve[^1].T) : 0;
-            diff.Add(new ChangePointRow { Index = curve.Count + 1, Temp = 60, TimeSec = lastT + 30, Ramp = RampShape.Linear, Role = ChangePointRole.Added });
-            return diff;
-        }
-
-        var points = action switch
-        {
-            ChangeAction.Criado => Rows(ChangePointRole.Added, 0),
-            ChangeAction.Removido => Rows(ChangePointRole.Removed, 0),
-            _ => EditDiff(),
+            ChangeAction.Criado => OperationType.Criacao,
+            ChangeAction.Removido => OperationType.Remocao,
+            _ => OperationType.Alteracao,
         };
+        var isConfig = c.DetailKind == ChangeDetailKind.Config;
+        var obj = isConfig ? OperationObject.Configuracao : OperationObject.Programa;
+        OperationField[] data = isConfig && c.ConfigBullets is { Count: > 0 } bullets
+            ? [.. bullets.Select(b => OperationField.Of("configuração", b))]
+            : [OperationField.Of("programa", c.Target)];
 
-        return new ChangeLogEntry
+        return new OperationLogEntry
         {
             Id = Guid.NewGuid(),
-            At = at,
-            Action = action,
-            Target = program.Name,
-            UserId = user.Id,
-            UserName = user.Name,
-            ProgramId = program.Id,
-            DetailKind = ChangeDetailKind.Program,
-            Points = points,
+            At = c.At,
+            OperatorId = c.UserId,
+            OperatorName = c.UserName ?? "Sistema",
+            Category = OpCategory(type, obj),
+            Type = type,
+            Object = obj,
+            ObjectId = c.ProgramId,
+            Data = [.. data],
         };
+    }
+
+    /// <summary>Session (login/logout), calibration, communication and maintenance audit rows, so every Log
+    /// de Operação sub-tab has content (including the automatic "Sistema" operator).</summary>
+    private static IEnumerable<OperationLogEntry> BuildMiscOperations(DateTimeOffset now, List<User> users)
+    {
+        var rows = new List<OperationLogEntry>();
+        for (var i = 0; i < users.Count; i++)
+        {
+            var u = users[i];
+            rows.Add(OpRow(now.AddHours(-(i * 5 + 2)), u, OperationType.Login, OperationObject.Sessao, u.Name, OperationField.Of("papel", u.Type)));
+            if (i % 2 == 0)
+                rows.Add(OpRow(now.AddHours(-(i * 5 + 1)), u, OperationType.Logout, OperationObject.Sessao, u.Name));
+        }
+        // A failed login attempt (security audit).
+        rows.Add(OpRow(now.AddHours(-9), null, OperationType.Login, OperationObject.Sessao, "desconhecido", OperationField.Of("resultado", "falha")));
+
+        // Calibration (technician).
+        rows.Add(OpRow(now.AddDays(-2), null, OperationType.Calibracao, OperationObject.Controlador, null,
+            OperationField.Change("currentGain", "100", "102.5"), OperationField.Change("thermoOffset", "0", "-1.5")));
+
+        // Communication — central server flapping + an OTA notice (automatic "Sistema").
+        rows.Add(OpRow(now.AddDays(-1).AddHours(-2), null, OperationType.Comunicacao, OperationObject.Controlador, "servidor-central", OperationField.Of("estado", "offline")));
+        rows.Add(OpRow(now.AddDays(-1).AddHours(-1), null, OperationType.Comunicacao, OperationObject.Controlador, "servidor-central", OperationField.Of("estado", "online")));
+        rows.Add(OpRow(now.AddHours(-6), null, OperationType.Comunicacao, OperationObject.Sistema, "ota", OperationField.Of("versao", "1.4.0")));
+
+        // Maintenance — a cleanup and a factory reset.
+        var admin = users.FirstOrDefault(u => u.Type == UserType.Admin);
+        rows.Add(OpRow(now.AddDays(-4), admin, OperationType.Limpeza, OperationObject.Configuracao, null,
+            OperationField.Of("categorias", "logs, falhas"), OperationField.Of("removidos", 37)));
+        return rows;
+    }
+
+    private static IEnumerable<Notification> BuildNotifications(DateTimeOffset now)
+    {
+        (NotificationFeedKind kind, string title, string message, int daysAgo, bool read, bool deleted)[] items =
+        [
+            (NotificationFeedKind.Warning, "Execução abortada", "'BGA Rework 250°C' foi abortada após 38 s.", 0, false, false),
+            (NotificationFeedKind.Error, "Falha na execução", "Sobretemperatura na grelha (E-101).", 1, false, false),
+            (NotificationFeedKind.Update, "Atualização disponível", "Nova versão 1.4.0 disponível para instalação.", 1, true, false),
+            (NotificationFeedKind.Info, "Servidor central reconectado", "A conexão com o servidor central foi restabelecida.", 2, true, false),
+            (NotificationFeedKind.Info, "Execução concluída", "'SMD 270°C' concluída em 410 s.", 3, true, true),
+            (NotificationFeedKind.Error, "Espaço em disco crítico", "Espaço livre em disco em 9% (2,9 GB de 32 GB).", 5, true, true),
+        ];
+        foreach (var n in items)
+            yield return new Notification
+            {
+                Id = Guid.NewGuid(),
+                At = now.AddDays(-n.daysAgo),
+                Kind = n.kind,
+                Title = n.title,
+                Message = n.message,
+                Read = n.read,
+                IsDeleted = n.deleted,
+                DeletedAt = n.deleted ? now.AddDays(-n.daysAgo).AddHours(2) : null,
+                DeletedBy = n.deleted ? "dev.pandewilly" : null,
+            };
     }
 
     /// <summary>Small stable FNV-1a hash → non-negative int, for deterministic demo variation.</summary>

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
-public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds, AuditService audit)
+public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds, AuditService audit, ICurrentUser current)
 {
     /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
     /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
@@ -16,13 +16,22 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var errors = await db.Errors.CountAsync(ct);
         var logs = await db.SystemLog.CountAsync(ct);
         var inativos = await db.Users.CountAsync(u => u.Status == UserStatus.Inativo, ct);
-        var totalUsers = await db.Users.CountAsync(ct);
+        var totalUsers = await db.Users.IgnoreQueryFilters().CountAsync(ct);
+
+        // Programs split into: active user programs (cleanable) and the soft-deleted ones (the trash, purgeable).
+        var totalPrograms = await db.Programs.IgnoreQueryFilters().CountAsync(ct);
+        var programas = await db.Programs.CountAsync(p => !p.IsSeed, ct);                          // active, user-created
+        var programasDel = await db.Programs.IgnoreQueryFilters().CountAsync(p => p.IsDeleted, ct);
+        // Active users a cleanup would remove: everyone active except the caller and the hidden Master.
+        var selfId = current.UserId;
+        var usuarios = await db.Users.CountAsync(u => u.Type != UserType.Master && (selfId == null || u.Id != selfId), ct);
 
         var sizes = await db.GetTableSizesBytesAsync(ct);
         long TableBytes(string table, int count) => sizes.TryGetValue(table, out var b) ? b : count * BytesPerRecord;
-        // Inactive users are a row subset of the Users table, so size them as their share of it.
+        // A row subset of a table is sized as its proportional share of that table's real on-disk size.
         var usersTable = sizes.TryGetValue("Users", out var ub) ? ub : totalUsers * BytesPerRecord;
-        var inativosBytes = totalUsers > 0 ? (long)Math.Round(usersTable * (double)inativos / totalUsers) : 0;
+        var programsTable = sizes.TryGetValue("Programs", out var pb) ? pb : totalPrograms * BytesPerRecord;
+        long Share(long table, int part, int total) => total > 0 ? (long)Math.Round(table * (double)part / total) : 0;
 
         // The Alterações (audit) log is intentionally absent: it is protected — never cleanable from here.
         var categories = new List<CategorySizeDto>
@@ -30,19 +39,33 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             new(CleanupId.Execucoes, "Execuções", exec, TableBytes("Executions", exec)),
             new(CleanupId.Falhas, "Falhas", errors, TableBytes("Errors", errors)),
             new(CleanupId.Logs, "Logs", logs, TableBytes("SystemLog", logs)),
-            new(CleanupId.Inativos, "Usuários inativos", inativos, inativosBytes),
+            new(CleanupId.Inativos, "Usuários inativos", inativos, Share(usersTable, inativos, totalUsers)),
+            new(CleanupId.Programas, "Programas salvos", programas, Share(programsTable, programas, totalPrograms)),
+            new(CleanupId.Usuarios, "Usuários ativos", usuarios, Share(usersTable, usuarios, totalUsers)),
+            new(CleanupId.ProgramasDeletados, "Programas deletados", programasDel, Share(programsTable, programasDel, totalPrograms)),
         };
         var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 
         var (freeGB, totalGB) = DiskSpace();
-        var cpu = await system.GetCpuLoadPercentAsync(ct);
-        return new MaintenanceOverviewDto(db_, cpu, freeGB, totalGB, RuntimeInformation.OSDescription, RuntimeInformation.RuntimeIdentifier);
+        var metrics = await system.GetMetricsAsync(ct);
+        // Real kernel version (uname -r style, e.g. "6.8.0-31-generic") rather than the .NET RuntimeIdentifier —
+        // the front shows this under "Versão do Linux".
+        return new MaintenanceOverviewDto(db_, metrics.CpuLoadPercent, freeGB, totalGB, RuntimeInformation.OSDescription, metrics.Kernel);
     }
+
+    // programas / usuarios / programas-deletados are destructive admin actions: the dev Master is read-only
+    // here (it sees the sizes in the overview but cannot clear them — front gating is not security).
+    private static readonly CleanupId[] AdminOnlyCategories = [CleanupId.Programas, CleanupId.Usuarios, CleanupId.ProgramasDeletados];
 
     public async Task<CleanupResultDto> CleanupAsync(IReadOnlyList<CleanupId> categories, CancellationToken ct = default)
     {
+        var cats = categories.Distinct().ToList();
+        if (current.Role == UserType.Master && cats.Any(AdminOnlyCategories.Contains))
+            throw new ForbiddenAppException("Apenas o Admin pode limpar programas salvos, usuários ativos ou programas deletados.");
+
+        var selfId = current.UserId;
         var deleted = 0;
-        foreach (var cat in categories.Distinct())
+        foreach (var cat in cats)
         {
             deleted += cat switch
             {
@@ -52,12 +75,18 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                 CleanupId.Falhas => await db.Errors.ExecuteDeleteAsync(ct),
                 CleanupId.Logs => await db.SystemLog.ExecuteDeleteAsync(ct),
                 CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo).ExecuteDeleteAsync(ct),
+                // Saved (active, user-created) programs — the factory seed catalog is kept; favorites cascade.
+                CleanupId.Programas => await db.Programs.Where(p => !p.IsSeed).ExecuteDeleteAsync(ct),
+                // Active users except the caller and the hidden Master (the spare-the-signed-in rule is server-side).
+                CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && (selfId == null || u.Id != selfId)).ExecuteDeleteAsync(ct),
+                // Empty the program trash: permanently delete every soft-deleted program.
+                CleanupId.ProgramasDeletados => await db.Programs.IgnoreQueryFilters().Where(p => p.IsDeleted).ExecuteDeleteAsync(ct),
                 _ => 0,
             };
         }
         audit.Record(OperationType.Limpeza, OperationObject.Configuracao, null,
         [
-            OperationField.Of("categorias", string.Join(", ", categories.Distinct().Select(c => EnumWire.ToWire(c)))),
+            OperationField.Of("categorias", string.Join(", ", cats.Select(c => EnumWire.ToWire(c)))),
             OperationField.Of("removidos", deleted),
         ]);
         await db.SaveChangesAsync(ct);

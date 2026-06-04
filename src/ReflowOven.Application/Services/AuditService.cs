@@ -97,7 +97,7 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
     private static OperationCategory CategoryFor(OperationType type, OperationObject obj) => type switch
     {
         OperationType.Execucao => OperationCategory.Execucao,
-        OperationType.Erro => OperationCategory.Erro,
+        OperationType.Erro => OperationCategory.Falha, // a board fault feeds the "Falha" sub-tab
         OperationType.Comunicacao => OperationCategory.Comunicacao,
         OperationType.Calibracao => OperationCategory.Calibracao,
         OperationType.Limpeza or OperationType.ResetFabrica => OperationCategory.Manutencao,

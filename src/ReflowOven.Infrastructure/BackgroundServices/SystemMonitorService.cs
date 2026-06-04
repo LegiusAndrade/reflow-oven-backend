@@ -19,6 +19,7 @@ public sealed class SystemMonitorService(
     IClock clock,
     IEmailSender email,
     ISystemLogSink systemLog,
+    INotificationSink notifications,
     IOptions<SystemOptions> options,
     ILogger<SystemMonitorService> logger) : BackgroundService
 {
@@ -146,16 +147,18 @@ public sealed class SystemMonitorService(
         using (var scope = scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-            db.Notifications.Add(new Notification
+            var notification = new Notification
             {
                 Id = Guid.NewGuid(),
                 At = at,
                 Kind = kind,
                 Title = title,
                 Message = message,
-            });
+            };
+            db.Notifications.Add(notification);
             db.SystemLog.Add(logEntry); // same unit of work; Id populated by the save below.
             await db.SaveChangesAsync(ct);
+            await notifications.PublishAsync(ReflowOven.Application.Dtos.NotificationDto.From(notification));
         }
 
         logger.LogInformation("Notificação gerada: {Kind} — {Title}", kind, title);

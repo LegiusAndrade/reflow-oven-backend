@@ -18,24 +18,9 @@ using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
-// Load a .env file (if present) into the process environment BEFORE configuration is read — .NET has no
-// native .env provider. Walk up from the working directory to the repo root; a real env var wins over the file.
-for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir is not null; dir = dir.Parent)
-{
-    var envPath = Path.Combine(dir.FullName, ".env");
-    if (!File.Exists(envPath)) continue;
-    foreach (var line in File.ReadAllLines(envPath))
-    {
-        var entry = line.Trim();
-        if (entry.Length == 0 || entry[0] == '#') continue;
-        var eq = entry.IndexOf('=');
-        if (eq <= 0) continue;
-        var key = entry[..eq].Trim();
-        if (Environment.GetEnvironmentVariable(key) is not null) continue; // a real env var wins over the file
-        Environment.SetEnvironmentVariable(key, entry[(eq + 1)..].Trim());
-    }
-    break; // first .env found (nearest ancestor) wins
-}
+// Configuration is read from appsettings(.Development).json plus real environment variables (the default
+// providers). Local secrets live directly in appsettings.json — kept out of git by the "secretscrub" clean
+// filter (scripts/setup_git_scrub.sh) — and production injects them as env vars. There is no .env file.
 
 // Bootstrap logger: captures anything thrown during startup (config, DI, migrations) on the console.
 // It is replaced by the fully-configured logger once the host is built (see UseSerilog below).
@@ -65,6 +50,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddSingleton<ITelemetrySink, SignalRTelemetrySink>();
 builder.Services.AddSingleton<ISystemLogSink, SignalRSystemLogSink>();
+builder.Services.AddSingleton<INotificationSink, SignalRNotificationSink>();
 
 // --- JSON (pt-BR enum strings, omit nulls) ----------------------------------------------
 builder.Services.AddControllers().AddJsonOptions(o =>
@@ -129,6 +115,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
     .AddPolicy(AuthPolicies.AdminOnly, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Master)))
+    // Admin only — excludes the Master (where the dev superuser must NOT act, e.g. deleting active users).
+    .AddPolicy(AuthPolicies.AdminStrict, p => p.RequireRole(nameof(UserType.Admin)))
     .AddPolicy(AuthPolicies.OperatorOrAdmin, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Regular), nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.MasterOnly, p => p.RequireRole(nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.CalibrationOnly, p => p.RequireClaim("calibration", "true"));
@@ -194,7 +182,7 @@ using (var scope = app.Services.CreateScope())
     await DbSeeder.SeedAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock,
         sp.GetRequiredService<IMasterCredentials>(), sp.GetRequiredService<IAdminCredentials>(), sp.GetRequiredService<IRegularCredentials>());
     if (app.Configuration.GetValue<bool>("Seed:Demo"))
-        await DbSeeder.SeedDemoAsync(db, clock);
+        await DbSeeder.SeedDemoAsync(db, sp.GetRequiredService<IPasswordHasher>(), clock);
 
     // One-shot startup "auditoria" of the persisted/seeded data (users, programs, logs by type).
     await ReflowOven.Api.StartupDiagnostics.LogAuditAsync(sp.GetRequiredService<SystemService>(), app.Logger);
@@ -250,6 +238,7 @@ app.MapControllers();
 app.MapHub<RunTelemetryHub>("/hubs/telemetry");
 app.MapHub<DiagnosticsHub>("/hubs/diagnostics");
 app.MapHub<SystemLogHub>("/hubs/systemlog");
+app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapHealthChecks("/health").AllowAnonymous();
 
 app.Run();

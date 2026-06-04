@@ -2,10 +2,11 @@ using System.Text.Json.Serialization;
 
 namespace ReflowOven.Domain.Entities;
 
-/// <summary>Kind of a feed notification (matches the frontend bell: info / error / update).</summary>
+/// <summary>Kind of a feed notification (matches the frontend bell: info / warning / error / update).</summary>
 public enum NotificationFeedKind
 {
     [JsonStringEnumMemberName("info")] Info,
+    [JsonStringEnumMemberName("warning")] Warning,
     [JsonStringEnumMemberName("error")] Error,
     [JsonStringEnumMemberName("update")] Update,
 }

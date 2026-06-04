@@ -3,7 +3,13 @@
 ## ⏭️ Próximas tarefas (backend) — para a próxima sessão (registrado 2026-06-01)
 
 Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perfil em runs ao vivo**) foi
-**concluída em 2026-06-03** — ver Resolvidos. **Recomendação: começar pela #1** (seed limpo em produção).
+**concluída em 2026-06-03** — ver Resolvidos.
+
+> **✅ Status (fim da sessão 2026-06-04):** #1, #2, #3, #4, #5, #6, #8, #9 **FEITOS e verificados ao vivo**
+> — seed limpo em prod (operadores demo-only) · hub de notificações em tempo real `/hubs/notifications` ·
+> "Execução abortada" → `warning` · limpeza real confirmada · categorias `programas`/`usuarios`/
+> `programas-deletados` no overview com bytes reais · kernel real (uname -r) no overview · 2 casas decimais ·
+> Log de Operação completo. **Resta só #7** (RS422 / hardware real — futuro, precisa do STM32/OrangePi).
 
 1. **Seed limpo em produção** — *segurança, escopo pequeno.* `operador1`/`operador2` (demo, senha
    `reflow1234`) ainda semeiam em **produção** (o seed de usuários roda no `SeedAsync`, não só no demo).
@@ -23,14 +29,18 @@ Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perf
 4. **Verificar "Limpeza mock-stage"** — a nota de 2026-06-01 (abaixo) diz que a Limpeza da Manutenção é mock,
    mas o `MaintenanceService.CleanupAsync` já usa `ExecuteDelete` (deleção real). Confirmar e fechar a nota.
 
-5. **Limpeza: categorias "Programas" e "Usuários ativos"** — *pedido do Lucas (2026-06-03).* O front já tem
-   as duas categorias prontas na Limpeza (Diagnóstico → Manutenção); elas aparecem **"vazio"** (desabilitadas)
-   até o backend mandar a contagem. Faltam dois pontos:
+5. **Limpeza: categorias "Programas", "Usuários ativos" e "Programas deletados"** — *pedido do Lucas
+   (2026-06-03; reforçado 2026-06-04).* O front já tem as categorias prontas na Limpeza (Diagnóstico →
+   Manutenção); elas aparecem **"vazio"** (desabilitadas) até o backend mandar a contagem. **⚠️ Re-confirmado
+   2026-06-04: o overview ainda retorna só `execucoes/falhas/logs/inativos`** — `programas`, `usuarios` e
+   `programas_deletados` **não vêm**, então o Master não vê o tamanho deles (o Lucas reportou de novo). Faltam:
    - `GET /api/maintenance/overview` → incluir em `database.categories` os ids **`programas`** (nº de programas
-     salvos + bytes) e **`usuarios`** (nº de usuários **ativos, exceto o autenticado** + bytes).
+     salvos + bytes), **`usuarios`** (nº de usuários **ativos, exceto o autenticado** + bytes) e
+     **`programas_deletados`** (nº de programas **soft-deleted / na lixeira** + bytes).
    - `POST /api/maintenance/cleanup` → tratar **`programas`** (apaga todos os programas salvos — decidir se
-     mantém 1 default, igual ao factory-reset) e **`usuarios`** (apaga os usuários **ativos exceto quem
-     chamou**). A regra "exceto o logado" **tem de ser server-side** (pelo JWT) — o front manda só o id
+     mantém 1 default, igual ao factory-reset), **`usuarios`** (apaga os usuários **ativos exceto quem
+     chamou**) e **`programas_deletados`** (expurga de vez os programas já soft-deleted, igual ao "purge" da
+     Lixeira #8). A regra "exceto o logado" **tem de ser server-side** (pelo JWT) — o front manda só o id
      `usuarios` e nunca decide quem poupar; ele apenas espelha a remoção no cache local.
    - **Permissão (decidido com o Lucas, 2026-06-04):** limpar `programas` e `usuarios` é **só do Admin** — o
      **Master NÃO pode** (exceção deliberada ao "Master ⊇ Admin"; em todo o resto o Master é superusuário).
@@ -39,6 +49,8 @@ Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perf
      não-selecionável) e nunca envia esses ids quando o autor é Master, mas o `POST /api/maintenance/cleanup`
      **tem de rejeitar** `programas`/`usuarios` vindos de um Master (403/ignorar) — gating de front não é
      segurança. Histórico (`execucoes`/`falhas`/`logs`/`inativos`) segue limpável por Admin **e** Master.
+     **`programas_deletados` (a confirmar):** é a lixeira (a Lixeira #8 é Master-only), então faz sentido ser
+     **Master-allowed**; no front deixei limpável por **ambos** por ora — confirmar se vira Master-only.
 
 6. **`osKernel` do overview vem como RID, não kernel** — *cosmético, escopo mínimo.*
    `GET /api/maintenance/overview` devolve `osKernel: "ubuntu.24.04-x64"` (um Runtime Identifier do .NET). O
@@ -131,6 +143,17 @@ Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perf
      vem como JSON em string). O front já pode montar a tela contra isso.
    - Follow-ups (não-bloqueantes): retenção/poda server-side; comunicação RS422 real do STM32 (o seam
      Comunicação/Controlador existe, só não é exercido pelo `SimulatedPowerBoard`); demo-seed de linhas variadas.
+
+10. **Programa recém-criado não aparece em 1º na ordenação "Padrão"** — *bug reportado pelo Lucas (2026-06-04).*
+    Em `ProgramService.ListAsync`, o sort default (`_ =>`) é `OrderBy(IsSeed).ThenByDescending(LastUsed ?? MinValue)
+    .ThenBy(Name)`. Um programa **recém-criado tem `LastUsed = null`** → cai no grupo "nunca usado", ordenado por
+    nome — então **nunca vem em primeiro** (o esperado pelo usuário). `Id` é `Guid.NewGuid()` (aleatório) e a
+    entidade **não tem `CreatedAt`**, então não há como ordenar por criação hoje. **Fix:**
+    - Adicionar **`CreatedAt` (DateTimeOffset)** em `ReflowProgram`; setar em `CreateAsync` (`DateTimeOffset.UtcNow`).
+    - **Migration** p/ a coluna (backfill das linhas existentes — ex. `LastUsed` ou uma data fixa; elas então
+      desempatam por nome).
+    - Sort default → `OrderBy(IsSeed).ThenByDescending(CreatedAt).ThenBy(Name)` (mais novo **primeiro**; "Usado
+      recentemente" continua cobrindo `LastUsed`). Assim o recém-criado abre em 1º na galeria.
 
 **Front (time do front):** tela **"Lixeira do Master"** (ver/restaurar/expurgar via `…/deleted` · `…/restore`
 · `…/purge`, MasterOnly) + remover a categoria "Alterações" da Limpeza — **backend já pronto**.
