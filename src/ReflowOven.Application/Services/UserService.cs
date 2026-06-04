@@ -157,6 +157,10 @@ public sealed class UserService(
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct)
             ?? throw new NotFoundException("Usuário não encontrado.");
 
+        // You can never delete your own account — defense in depth behind the front hiding the button.
+        if (current.UserId == id)
+            throw new ForbiddenAppException("Você não pode excluir a própria conta.");
+
         // The dev Master is permanent — never removable through the Usuários screen.
         if (user.Type == UserType.Master)
             throw new ForbiddenAppException("O usuário Master não pode ser removido.");

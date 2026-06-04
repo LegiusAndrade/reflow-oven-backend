@@ -43,9 +43,15 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             new(CleanupId.Inativos, "Usuários inativos", inativos, Share(usersTable, inativos, totalUsers)),
             new(CleanupId.Programas, "Programas salvos", programas, Share(programsTable, programas, totalPrograms)),
             new(CleanupId.Usuarios, "Usuários ativos", usuarios, Share(usersTable, usuarios, totalUsers)),
-            new(CleanupId.ProgramasDeletados, "Programas deletados", programasDel, Share(programsTable, programasDel, totalPrograms)),
-            new(CleanupId.UsuariosDeletados, "Usuários deletados", usuariosDel, Share(usersTable, usuariosDel, totalUsers)),
         };
+        // The trash (soft-deleted programs/users) is the Master's domain — the MasterOnly Lixeira + per-item
+        // restore/purge — so these two categories are returned (and cleanable) ONLY for the Master; the Admin
+        // never sees them here.
+        if (current.Role == UserType.Master)
+        {
+            categories.Add(new(CleanupId.ProgramasDeletados, "Programas deletados", programasDel, Share(programsTable, programasDel, totalPrograms)));
+            categories.Add(new(CleanupId.UsuariosDeletados, "Usuários deletados", usuariosDel, Share(usersTable, usuariosDel, totalUsers)));
+        }
         var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 
         var (freeGB, totalGB) = DiskSpace();
@@ -63,11 +69,18 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
     private static readonly CleanupId[] AdminOnlyCategories =
         [CleanupId.Inativos, CleanupId.Programas, CleanupId.Usuarios];
 
+    // The inverse: the trash (soft-deleted programs/users) is the Master's domain (the MasterOnly Lixeira),
+    // so ONLY the Master may bulk-empty it — the Admin (and Regular) is rejected here too.
+    private static readonly CleanupId[] MasterOnlyCategories =
+        [CleanupId.ProgramasDeletados, CleanupId.UsuariosDeletados];
+
     public async Task<CleanupResultDto> CleanupAsync(IReadOnlyList<CleanupId> categories, CancellationToken ct = default)
     {
         var cats = categories.Distinct().ToList();
         if (current.Role == UserType.Master && cats.Any(AdminOnlyCategories.Contains))
             throw new ForbiddenAppException("Apenas o Admin pode limpar usuários ativos/inativos ou programas salvos.");
+        if (current.Role != UserType.Master && cats.Any(MasterOnlyCategories.Contains))
+            throw new ForbiddenAppException("Apenas o Master pode esvaziar a lixeira (programas/usuários deletados).");
 
         var selfId = current.UserId;
         var deleted = 0;
