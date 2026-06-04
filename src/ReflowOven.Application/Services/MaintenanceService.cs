@@ -24,7 +24,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var programasDel = await db.Programs.IgnoreQueryFilters().CountAsync(p => p.IsDeleted, ct);
         // Active users a cleanup would remove: everyone active except the caller and the hidden Master.
         var selfId = current.UserId;
-        var usuarios = await db.Users.CountAsync(u => u.Type != UserType.Master && (selfId == null || u.Id != selfId), ct);
+        var usuarios = await db.Users.CountAsync(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId), ct);
         var usuariosDel = await db.Users.IgnoreQueryFilters().CountAsync(u => u.IsDeleted, ct);   // soft-deleted (Lixeira)
 
         var sizes = await db.GetTableSizesBytesAsync(ct);
@@ -55,17 +55,19 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         return new MaintenanceOverviewDto(db_, metrics.CpuLoadPercent, freeGB, totalGB, RuntimeInformation.OSDescription, metrics.Kernel);
     }
 
-    // Clearing users (inactive = "deleted", or active) and programs (saved or trashed) is a destructive admin
-    // action: the dev Master is read-only here — it sees the counts/sizes in the overview (to inform the Admin)
-    // but cannot clear them. Device history (execuções/falhas/logs) stays clearable by Admin AND Master.
+    // Clearing the customer's LIVE data — inactive users, saved (active) programs, active users — is an
+    // Admin-only destructive action: the dev Master is read-only there (it only sees the counts/sizes, to
+    // inform the Admin). The TRASH (soft-deleted users/programs) is the Master's OWN domain — the MasterOnly
+    // Lixeira + per-item restore/purge — so it may bulk-empty those too (e.g. users the Admin deleted);
+    // device history (execuções/falhas/logs) stays clearable by Admin AND Master.
     private static readonly CleanupId[] AdminOnlyCategories =
-        [CleanupId.Inativos, CleanupId.Programas, CleanupId.Usuarios, CleanupId.ProgramasDeletados, CleanupId.UsuariosDeletados];
+        [CleanupId.Inativos, CleanupId.Programas, CleanupId.Usuarios];
 
     public async Task<CleanupResultDto> CleanupAsync(IReadOnlyList<CleanupId> categories, CancellationToken ct = default)
     {
         var cats = categories.Distinct().ToList();
         if (current.Role == UserType.Master && cats.Any(AdminOnlyCategories.Contains))
-            throw new ForbiddenAppException("Apenas o Admin pode limpar usuários (inativos/ativos) ou programas (salvos/deletados).");
+            throw new ForbiddenAppException("Apenas o Admin pode limpar usuários ativos/inativos ou programas salvos.");
 
         var selfId = current.UserId;
         var deleted = 0;
@@ -81,8 +83,9 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                 CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo).ExecuteDeleteAsync(ct),
                 // Saved (active, user-created) programs — the factory seed catalog is kept; favorites cascade.
                 CleanupId.Programas => await db.Programs.Where(p => !p.IsSeed).ExecuteDeleteAsync(ct),
-                // Active users except the caller and the hidden Master (the spare-the-signed-in rule is server-side).
-                CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && (selfId == null || u.Id != selfId)).ExecuteDeleteAsync(ct),
+                // ACTIVE users only (inativos have their own category), except the caller and the hidden Master
+                // (the spare-the-signed-in rule is server-side).
+                CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId)).ExecuteDeleteAsync(ct),
                 // Empty the program trash: permanently delete every soft-deleted program.
                 CleanupId.ProgramasDeletados => await db.Programs.IgnoreQueryFilters().Where(p => p.IsDeleted).ExecuteDeleteAsync(ct),
                 // Empty the user trash: permanently delete every soft-deleted user.

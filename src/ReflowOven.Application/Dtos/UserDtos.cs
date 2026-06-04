@@ -12,7 +12,8 @@ public sealed record UserDto(
     UserStatus Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? LastLogin,
-    IReadOnlyList<UserEventDto> Events);
+    IReadOnlyList<UserEventDto> Events,
+    bool CanDelete);
 
 public sealed record UserEventDto(string Label, int Count);
 

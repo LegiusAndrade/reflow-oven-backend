@@ -25,6 +25,10 @@ public class ReflowProgram
     /// just-created program sort to the top even before it has ever been run.</summary>
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>Id of the user who created it (null for seed/catalog programs). The dev Master may only delete
+    /// programs it created, so the per-item delete authority is derived from this.</summary>
+    public Guid? CreatedById { get; set; }
+
     public bool IsDeleted { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
     /// <summary>Name of whoever deleted it (shown in the Master's trash view); null while live.</summary>

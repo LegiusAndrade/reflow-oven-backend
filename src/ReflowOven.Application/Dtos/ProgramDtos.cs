@@ -17,7 +17,8 @@ public sealed record ProgramDto(
     DateTimeOffset CreatedAt,
     IReadOnlyList<ProfilePointDto> Profile,
     IReadOnlyList<ProfileSegmentDto>? Segments,
-    bool Favorite);
+    bool Favorite,
+    bool CanDelete);
 
 /// <summary>
 /// Create/edit payload. Provide <c>Segments</c> (the editor's source of truth) and the server

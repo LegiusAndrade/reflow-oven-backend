@@ -115,8 +115,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
     .AddPolicy(AuthPolicies.AdminOnly, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Master)))
-    // Admin only — excludes the Master (where the dev superuser must NOT act, e.g. deleting active users).
-    .AddPolicy(AuthPolicies.AdminStrict, p => p.RequireRole(nameof(UserType.Admin)))
     .AddPolicy(AuthPolicies.OperatorOrAdmin, p => p.RequireRole(nameof(UserType.Admin), nameof(UserType.Regular), nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.MasterOnly, p => p.RequireRole(nameof(UserType.Master)))
     .AddPolicy(AuthPolicies.CalibrationOnly, p => p.RequireClaim("calibration", "true"));

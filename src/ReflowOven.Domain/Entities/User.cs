@@ -23,6 +23,10 @@ public class User
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>Id of the user who created this account (null for seeded users). The dev Master may only delete
+    /// users it created, so the per-item delete authority is derived from this.</summary>
+    public Guid? CreatedById { get; set; }
+
     /// <summary>Null = never logged in (rendered as "—" on the client).</summary>
     public DateTimeOffset? LastLogin { get; set; }
 

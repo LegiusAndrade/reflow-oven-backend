@@ -55,6 +55,7 @@ public sealed class UserService(
             Type = req.Type,
             Status = req.Status,
             CreatedAt = now,
+            CreatedById = current.UserId,
             MustChangePassword = true,
             PasswordIssuedAt = now,
         };
@@ -160,6 +161,11 @@ public sealed class UserService(
         if (user.Type == UserType.Master)
             throw new ForbiddenAppException("O usuário Master não pode ser removido.");
 
+        // The dev Master may only delete users it created; the Admin removes any. (The front hides the delete
+        // control for non-own users via UserDto.CanDelete — this is the server-side guard behind it.)
+        if (current.Role == UserType.Master && user.CreatedById != current.UserId)
+            throw new ForbiddenAppException("O Master só pode excluir usuários criados por ele.");
+
         if (await IsLastActiveAdminAsync(id, ct))
             throw new ConflictException("Não é possível remover o único administrador ativo.");
 
@@ -192,7 +198,11 @@ public sealed class UserService(
         user.IsDeleted = false;
         user.DeletedAt = null;
         user.DeletedBy = null;
-        audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name, [OperationField.Of("restaurado", "sim")]);
+        // A restored user ALWAYS comes back inactive — never auto-reactivated. Restore only un-trashes it; an
+        // Admin must deliberately set it Ativo before it can log in again.
+        user.Status = UserStatus.Inativo;
+        audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name,
+            [OperationField.Of("restaurado", "sim"), OperationField.Of("status", UserStatus.Inativo)]);
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Usuário restaurado: '{Name}' por '{Actor}'.", user.Name, current.Name);
         return Map(user);
@@ -218,7 +228,16 @@ public sealed class UserService(
         return !await db.Users.AnyAsync(u => u.Id != userId && u.Type == UserType.Admin && u.Status == UserStatus.Ativo, ct);
     }
 
-    private static UserDto Map(User u) => new(
+    // Per-item delete authority for the current caller: the Admin manages every user; the dev Master may only
+    // remove users IT created (others don't even show a delete control); nobody else deletes here.
+    private bool CanDelete(Guid? createdById) => current.Role switch
+    {
+        UserType.Admin => true,
+        UserType.Master => createdById is not null && createdById == current.UserId,
+        _ => false,
+    };
+
+    private UserDto Map(User u) => new(
         u.Id.ToString(),
         u.Name,
         u.Email,
@@ -226,5 +245,6 @@ public sealed class UserService(
         u.Status,
         u.CreatedAt,
         u.LastLogin,
-        u.ActivityStats.OrderBy(s => s.Id).Select(s => new UserEventDto(s.Label, s.Count)).ToList());
+        u.ActivityStats.OrderBy(s => s.Id).Select(s => new UserEventDto(s.Label, s.Count)).ToList(),
+        CanDelete(u.CreatedById));
 }

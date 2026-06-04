@@ -21,9 +21,8 @@ public sealed class UsersController(UserService users) : ControllerBase
     [HttpPut("{id:guid}")]
     public Task<UserDto> Update(Guid id, [FromBody] UpdateUserRequest req, CancellationToken ct) => users.UpdateAsync(id, req, ct);
 
-    // The dev Master may NOT soft-delete an active user — that is Admin-only (AdminStrict excludes Master).
-    // The Master still manages the user trash (restore/purge) below.
-    [Authorize(Policy = AuthPolicies.AdminStrict)]
+    // The dev Master may delete ONLY users it created (UserService enforces ownership); the Admin removes any.
+    // Inherits the controller's AdminOnly policy. The Master still manages the user trash (restore/purge) below.
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {

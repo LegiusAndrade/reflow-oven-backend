@@ -7,10 +7,6 @@ public static class AuthPolicies
     /// The dev <c>Master</c> superuser also satisfies this (inherits all Admin powers).</summary>
     public const string AdminOnly = "AdminOnly";
 
-    /// <summary>Admin ONLY — the dev <c>Master</c> does NOT satisfy this. For the few destructive actions the
-    /// Master must not perform (deleting active users; the bulk "programas"/"usuários ativos" cleanup).</summary>
-    public const string AdminStrict = "AdminStrict";
-
     /// <summary>Runs may be started/stopped by an operator (Regular), an Admin, or the Master.</summary>
     public const string OperatorOrAdmin = "OperatorOrAdmin";
 

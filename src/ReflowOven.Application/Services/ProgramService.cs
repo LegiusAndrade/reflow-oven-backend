@@ -71,6 +71,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
             RunCount = 0,
             LastUsed = null,
             CreatedAt = clock.UtcNow,
+            CreatedById = current.UserId,
             IsSeed = false,
             Segments = segments,
             Profile = profile,
@@ -111,6 +112,11 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
     {
         var program = await db.Programs.FirstOrDefaultAsync(p => p.Id == id, ct)
             ?? throw new NotFoundException("Programa não encontrado.");
+
+        // The dev Master may only delete programs it created; the Admin removes any. (The front hides the delete
+        // control for non-own programs via ProgramDto.CanDelete — this is the server-side guard behind it.)
+        if (current.Role == UserType.Master && program.CreatedById != current.UserId)
+            throw new ForbiddenAppException("O Master só pode excluir programas criados por ele.");
 
         program.IsDeleted = true;
         program.DeletedAt = clock.UtcNow;
@@ -312,7 +318,16 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
     private static double Peak(ReflowProgram p) => p.Profile.Count > 0 ? p.Profile.Max(pt => pt.Temp) : 0;
     private static double Total(ReflowProgram p) => ProfileBuilder.TotalTime(p.Profile);
 
-    private static ProgramDto Map(ReflowProgram p, bool favorite) => new(
+    // Per-item delete authority for the current caller: the Admin manages every program; the dev Master may
+    // only remove programs IT created (others don't even show a delete control); nobody else deletes here.
+    private bool CanDelete(Guid? createdById) => current.Role switch
+    {
+        UserType.Admin => true,
+        UserType.Master => createdById is not null && createdById == current.UserId,
+        _ => false,
+    };
+
+    private ProgramDto Map(ReflowProgram p, bool favorite) => new(
         p.Id,
         p.Name,
         p.Description,
@@ -321,5 +336,6 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         p.CreatedAt,
         p.Profile.Select(pt => new ProfilePointDto(pt.T, pt.Temp)).ToList(),
         p.Segments?.Select(s => new ProfileSegmentDto(s.Temp, s.DurationSec, s.Ramp)).ToList(),
-        favorite);
+        favorite,
+        CanDelete(p.CreatedById));
 }
