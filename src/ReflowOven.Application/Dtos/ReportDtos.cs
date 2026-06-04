@@ -154,4 +154,12 @@ public sealed record ReportQuery(
     string? ProgramId = null,
     /// <summary>Strictly-earlier cursor (exclusive): keep rows with <c>At &lt; Before</c>. Distinct
     /// from <c>To</c> (inclusive end-of-day).</summary>
-    DateTimeOffset? Before = null);
+    DateTimeOffset? Before = null,
+    /// <summary>Operation-log filters (Log de Operação): <c>Operator</c> name (contains, case-insensitive),
+    /// <c>Type</c>/<c>Object</c> as the enum wire literals (ignored if unrecognized) and an exact
+    /// <c>ObjectId</c>. Ignored by the other report lists.</summary>
+    string? Operator = null,
+    string? Type = null,
+    string? Object = null,
+    string? ObjectId = null,
+    string? Category = null);

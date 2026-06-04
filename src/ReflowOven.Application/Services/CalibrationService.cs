@@ -1,7 +1,7 @@
 namespace ReflowOven.Application.Services;
 
 /// <summary>Reads/updates the calibration singleton, pushes it to the board, and fits the output wizard sweep.</summary>
-public sealed class CalibrationService(IAppDbContext db, IPowerBoard board)
+public sealed class CalibrationService(IAppDbContext db, IPowerBoard board, AuditService audit)
 {
     public async Task<CalibrationDto> GetAsync(CancellationToken ct = default) => Map(await LoadAsync(ct));
 
@@ -9,11 +9,21 @@ public sealed class CalibrationService(IAppDbContext db, IPowerBoard board)
     {
         Validate(dto);
         var c = await LoadAsync(ct);
+
+        // Audit the per-field diff (offsets/gains/PWM) before applying it. Calibração is a technician action.
+        var changes = new List<OperationField>();
+        if (c.ThermoOffset != dto.ThermoOffset) changes.Add(OperationField.Change("thermoOffset", c.ThermoOffset, dto.ThermoOffset));
+        if (c.CurrentOffset != dto.CurrentOffset) changes.Add(OperationField.Change("currentOffset", c.CurrentOffset, dto.CurrentOffset));
+        if (c.CurrentGain != dto.CurrentGain) changes.Add(OperationField.Change("currentGain", c.CurrentGain, dto.CurrentGain));
+        if (c.FanPwmMin != dto.FanPwmMin) changes.Add(OperationField.Change("fanPwmMin", c.FanPwmMin, dto.FanPwmMin));
+        if (c.FanPwmMax != dto.FanPwmMax) changes.Add(OperationField.Change("fanPwmMax", c.FanPwmMax, dto.FanPwmMax));
+
         c.ThermoOffset = dto.ThermoOffset;
         c.CurrentOffset = dto.CurrentOffset;
         c.CurrentGain = dto.CurrentGain;
         c.FanPwmMin = dto.FanPwmMin;
         c.FanPwmMax = dto.FanPwmMax;
+        audit.Record(OperationType.Calibracao, OperationObject.Controlador, null, changes, operatorName: "Calibração");
         await db.SaveChangesAsync(ct);
         await board.ApplyCalibrationAsync(c, ct);
         return Map(c);

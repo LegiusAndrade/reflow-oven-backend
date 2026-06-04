@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<SettingsService>();
         services.AddScoped<CalibrationService>();
         services.AddScoped<ReportService>();
+        services.AddScoped<OperationLogService>();
         services.AddScoped<DiagnosticsService>();
         services.AddScoped<MaintenanceService>();
         services.AddScoped<DeviceService>();

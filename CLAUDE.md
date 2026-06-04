@@ -94,8 +94,11 @@ Clean Architecture, four projects + tests; dependencies point inward (Api → In
 - **Limits are a single source of truth.** `DomainConstants` mirrors `../reflow-oven-front/src/lib/limits.ts`
   exactly. Enforce caps via the validators/services; keep the two files in lock-step.
 - **Soft-delete & audit.** Programs are soft-deleted (`IsDeleted` + a global query filter hides them and the
-  seeded catalog); everything else is hard-deleted. `AuditService` writes a `ChangeLogEntry` and bumps the
-  per-user activity counters on every program/config mutation.
+  seeded catalog); everything else is hard-deleted. `AuditService` writes a `ChangeLogEntry` (the Relatórios →
+  Alterações diff) on program/config mutations and bumps per-user activity counters; its `Record(...)` **also**
+  appends to the universal **`OperationLog`** (Log de Operação — `GET /api/operation-log`, **Master-only**), an
+  append-only audit trail every service seam writes to (changes, executions, faults, comms, logins, calibration,
+  maintenance) with `category` derived from `(type, object)` and protected from the Manutenção cleanup.
 - **Logging is console-only (Serilog).** `Program.cs` wires Serilog (`UseSerilog` + `UseSerilogRequestLogging`
   → one line per HTTP request). Operational events are logged at the service seams: `AuthService`
   (login OK/falha/logout), `UserService` (CRUD), `AuditService` (program + config changes — covers

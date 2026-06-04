@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ReflowOven.Application.Dtos;
+using ReflowOven.Application.Services;
 
 namespace ReflowOven.Infrastructure.Run;
 
@@ -32,6 +33,7 @@ public sealed class RunManager(
 
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            var audit = scope.ServiceProvider.GetRequiredService<AuditService>();
 
             var program = await db.Programs.FirstOrDefaultAsync(p => p.Id == programId, ct)
                 ?? throw new NotFoundException("Programa não encontrado.");
@@ -41,6 +43,13 @@ public sealed class RunManager(
                 : program.Segments is { Count: > 0 } ? ProfileBuilder.ToProfile(program.Segments) : [];
             if (profile.Count == 0)
                 throw new ConflictException("O programa não possui um perfil válido.");
+
+            // Logical stages for the report's Comparativo do Perfil: one per editable segment when the
+            // program defines them (parabola sub-points collapsed to a single leg), otherwise each stored
+            // profile vertex after the t=0 baseline.
+            var stages = program.Segments is { Count: > 0 }
+                ? ProfileBuilder.StageBoundaries(program.Segments)
+                : [.. profile.Where(p => p.T > 0)];
 
             var settings = await db.Settings.FirstOrDefaultAsync(s => s.Id == 1, ct);
             var limits = settings is null
@@ -59,6 +68,10 @@ public sealed class RunManager(
             {
                 // Board refused to start: leave _active null (no zombie run) and surface the failure.
                 logger.LogError(ex, "Falha ao iniciar o programa '{Program}' na placa.", program.Name);
+                audit.Record(OperationType.Comunicacao, OperationObject.Controlador, program.Id,
+                    [OperationField.Of("evento", "falha ao iniciar na placa"), OperationField.Of("erro", ex.Message)],
+                    operatorId: userId, operatorName: userName ?? "Sistema");
+                try { await db.SaveChangesAsync(ct); } catch { /* best-effort audit; the start failure is the real error */ }
                 throw;
             }
 
@@ -70,12 +83,17 @@ public sealed class RunManager(
                 UserId = userId,
                 UserName = userName,
                 Profile = profile,
+                Stages = stages,
                 StartedAt = clock.UtcNow,
                 TotalSeconds = ProfileBuilder.TotalTime(profile),
                 Status = RunStatus.Running,
                 Phase = RunPhase.Aquecimento,
             };
             _active = run;
+            audit.Record(OperationType.Execucao, OperationObject.Execucao, run.RunId.ToString(),
+                [OperationField.Of("evento", "iniciada"), OperationField.Of("programa", run.ProgramName)],
+                operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
+            await db.SaveChangesAsync(ct);
             logger.LogInformation("Execução iniciada: '{Program}' por '{User}' (run {RunId}, {Total}s).",
                 run.ProgramName, userName ?? "técnico", run.RunId, (int)run.TotalSeconds);
             await sink.PublishStatusAsync(run.RunId, RunStatus.Running);
@@ -114,7 +132,11 @@ public sealed class RunManager(
             var reading = await board.ReadAsync(ct);
             var alvo = ProfileBuilder.TempAt(run.Profile, elapsed);
 
-            var sample = new TraceSample(elapsed, alvo, reading.OvenTempC, reading.BoardTempC, reading.CurrentA, reading.VoltageV, reading.OvenFanRpm, reading.BoardFanRpm);
+            // Telemetry is streamed and stored at 2 decimals (Alvo is interpolated, so it would otherwise
+            // carry a long tail). The peak trackers below read the raw values before their own rounding.
+            var sample = new TraceSample(
+                Math.Round(elapsed, 2), Math.Round(alvo, 2), Math.Round(reading.OvenTempC, 2), Math.Round(reading.BoardTempC, 2),
+                Math.Round(reading.CurrentA, 2), Math.Round(reading.VoltageV, 2), reading.OvenFanRpm, reading.BoardFanRpm);
             run.Last = sample;
             run.Samples.Add(sample);
             run.PeakTemp = Math.Max(run.PeakTemp, reading.OvenTempC);
@@ -178,6 +200,7 @@ public sealed class RunManager(
             FaultTypeCode = fault?.Code,
             CreatedAt = endedAt,
             Points = BuildPoints(run),
+            Comparison = ProfileBuilder.BuildComparison(run.Stages, run.Samples),
             Trace = BuildTrace(run, duration),
             Events =
             [
@@ -211,6 +234,7 @@ public sealed class RunManager(
         using (var scope = scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            var audit = scope.ServiceProvider.GetRequiredService<AuditService>();
 
             db.SystemLog.Add(logEntry); // saved in the same unit of work; Id is set after SaveChangesAsync.
 
@@ -255,6 +279,13 @@ public sealed class RunManager(
                     _ => $"'{run.ProgramName}' falhou após {duration}s ({fault?.Code ?? "sem código"}).",
                 },
             });
+            audit.Record(OperationType.Execucao, OperationObject.Execucao, run.RunId.ToString(),
+                [OperationField.Of("status", execStatus), OperationField.Of("duracao_s", duration), OperationField.Of("pico_C", report.PeakTemp)],
+                operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
+            if (fault is { } fa)
+                audit.Record(OperationType.Erro, OperationObject.Falha, report.LinkedErrorId?.ToString(),
+                    [OperationField.Of("codigo", fa.Code), OperationField.Of("motivo", fa.Message)],
+                    operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
             await db.SaveChangesAsync(ct);
         }
 
@@ -341,6 +372,8 @@ public sealed class RunManager(
         public Guid? UserId { get; init; }
         public string? UserName { get; init; }
         public List<ProfilePoint> Profile { get; init; } = [];
+        /// <summary>Logical stage boundaries (end-time + target temp) for the per-stage Comparativo do Perfil.</summary>
+        public List<ProfilePoint> Stages { get; init; } = [];
         public DateTimeOffset StartedAt { get; init; }
         public double TotalSeconds { get; init; }
         public RunStatus Status { get; set; }

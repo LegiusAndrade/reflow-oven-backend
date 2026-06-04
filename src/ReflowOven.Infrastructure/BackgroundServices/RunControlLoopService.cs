@@ -17,43 +17,51 @@ public sealed class RunControlLoopService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(DomainConstants.RunTickMs));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        try
         {
-            try
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                if (runManager.GetStatus() is { Status: RunStatus.Running })
+                try
                 {
-                    await runManager.TickAsync(stoppingToken);
+                    if (runManager.GetStatus() is { Status: RunStatus.Running })
+                    {
+                        await runManager.TickAsync(stoppingToken);
+                    }
+                    else
+                    {
+                        var reading = await board.ReadAsync(stoppingToken);
+                        await sink.PublishReadingAsync(reading);
+                    }
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    var reading = await board.ReadAsync(stoppingToken);
-                    await sink.PublishReadingAsync(reading);
+                    throw; // shutdown: bubble to the outer handler so the loop ends cleanly
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Falha no loop de controle da execução.");
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Falha no loop de controle da execução.");
 
-                // Don't leave a half-ticked run stuck as "Running" forever (which would make every
-                // future start fail with "Já existe uma execução em andamento"). Abort it cleanly.
-                if (runManager.GetStatus() is { Status: RunStatus.Running })
-                {
-                    try
+                    // Don't leave a half-ticked run stuck as "Running" forever (which would make every
+                    // future start fail with "Já existe uma execução em andamento"). Abort it cleanly.
+                    if (runManager.GetStatus() is { Status: RunStatus.Running })
                     {
-                        await runManager.StopAsync(stoppingToken);
-                        logger.LogWarning("Execução ativa abortada após falha no loop de controle.");
-                    }
-                    catch (Exception stopEx)
-                    {
-                        logger.LogError(stopEx, "Não foi possível abortar a execução após a falha no loop.");
+                        try
+                        {
+                            await runManager.StopAsync(stoppingToken);
+                            logger.LogWarning("Execução ativa abortada após falha no loop de controle.");
+                        }
+                        catch (Exception stopEx)
+                        {
+                            logger.LogError(stopEx, "Não foi possível abortar a execução após a falha no loop.");
+                        }
                     }
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown — the stopping token cancels a tick or WaitForNextTickAsync. Swallow it
+            // so it isn't surfaced as unhandled (the debugger was flagging this) and the loop stops cleanly.
         }
     }
 }

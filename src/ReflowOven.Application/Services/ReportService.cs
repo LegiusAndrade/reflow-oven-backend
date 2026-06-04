@@ -168,12 +168,34 @@ public sealed class ReportService(IAppDbContext db)
             Unchanged: points.Count(p => p.Status == "unchanged"),
             ChangedFields: changedFieldCounts);
 
-        var beforeCurve = points.Where(p => p.Before is not null)
-            .Select(p => new ProfilePointDto(p.Before!.TimeSec, p.Before.Temp)).ToList();
-        var afterCurve = points.Where(p => p.After is not null)
-            .Select(p => new ProfilePointDto(p.After!.TimeSec, p.After.Temp)).ToList();
+        var beforeCurve = ExpandCurve(points.Where(p => p.Before is not null).Select(p => p.Before!));
+        var afterCurve = ExpandCurve(points.Where(p => p.After is not null).Select(p => p.After!));
 
         return (new ChangeDiffDto(summary, points), beforeCurve, afterCurve);
+    }
+
+    /// <summary>
+    /// Rebuild the real setpoint curve from the snapshot vertices so the change chart matches what the
+    /// program actually runs. The stored rows are the per-leg vertices (cumulative time + target + ramp);
+    /// turning them back into editable segments and re-expanding through <see cref="ProfileBuilder.ToProfile"/>
+    /// restores the t=0 baseline, the parabola sub-points and a <c>Fixo</c> leg's held temperature — none of
+    /// which survive a plain "vertex → point" projection (that dropped the baseline, straightened parabolas
+    /// and plotted a Fixo's raw, unused temperature). Point-defined programs round-trip unchanged: their legs
+    /// are linear, so the expansion reproduces the same straight segments.
+    /// </summary>
+    private static List<ProfilePointDto> ExpandCurve(IEnumerable<ChangePointValueDto> vertices)
+    {
+        var verts = vertices.ToList(); // already in index order (cumulative time strictly increasing)
+        if (verts.Count == 0) return [];
+
+        var segments = new List<ProfileSegment>(verts.Count);
+        var prevT = 0;
+        foreach (var v in verts)
+        {
+            segments.Add(new ProfileSegment { Temp = (int)Math.Round(v.Temp), DurationSec = Math.Max(0, v.TimeSec - prevT), Ramp = v.Ramp });
+            prevT = v.TimeSec;
+        }
+        return ProfileBuilder.ToProfile(segments).Select(p => new ProfilePointDto(p.T, p.Temp)).ToList();
     }
 
     // --- fault catalog & system log -------------------------------------------------------

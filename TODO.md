@@ -2,33 +2,135 @@
 
 ## ⏭️ Próximas tarefas (backend) — para a próxima sessão (registrado 2026-06-01)
 
-Levantadas ao fim da sessão de 2026-06-01. **Recomendação: começar pela #1** (bug confirmado).
+Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perfil em runs ao vivo**) foi
+**concluída em 2026-06-03** — ver Resolvidos. **Recomendação: começar pela #1** (seed limpo em produção).
 
-1. **⭐ Comparativo do Perfil em runs ao vivo** — *bug confirmado, alto valor.* `RunManager.FinalizeAsync`
-   monta `Trace`/`Points`/`Events`, mas **não** preenche `Comparison` → a tabela "Comparativo do Perfil"
-   fica vazia em execução real (só os seeds demo têm; é a nota do front "comparison vazio em TODA execução").
-   Implementar: comparar o perfil programado × a trace medida **por estágio**
-   (`tempProg`/`tempReal`/`timeProgSeconds`/`timeRealSeconds`/`stageIndex`), como `DbSeeder.Demo.BuildExecution`
-   já faz. Escopo médio.
-
-2. **Seed limpo em produção** — *segurança, escopo pequeno.* `operador1`/`operador2` (demo, senha
+1. **Seed limpo em produção** — *segurança, escopo pequeno.* `operador1`/`operador2` (demo, senha
    `reflow1234`) ainda semeiam em **produção** (o seed de usuários roda no `SeedAsync`, não só no demo).
    Gatear os usuários/dados demo atrás de `Seed:Demo` (dev-only) → prod só ganha Admin/Regular/Master da
    config. Opcional: fail-fast se `Admin__Password`/`Regular__Password` ficarem no default fora de Development
    (igual ao Master/Jwt em `Program.cs`).
 
-3. **Notificações em tempo real (SignalR)** — o feed do sininho é polling; adicionar um hub de push
+2. **Notificações em tempo real (SignalR)** — o feed do sininho é polling; adicionar um hub de push
    espelhando o `/hubs/systemlog` (ver `ISystemLogSink`/`SignalRSystemLogSink`/`SystemLogHub`). Escopo médio.
 
-4. **Eventos → notificações + `kind`** — definir/implementar quais eventos geram entrada no feed e o `kind`
-   (`info`/`error`/`update`): execução **abortada** → warning, **falha da placa**, **OTA** disponível.
-   Escopo pequeno.
+3. **Eventos → notificações + `kind`** — definir/implementar quais eventos geram entrada no feed e o `kind`
+   (`info`/`error`/`warning`/`update`): execução **abortada** → warning, **falha da placa**, **OTA** disponível.
+   Escopo pequeno. **Status (verificado 2026-06-03):** a notificação de **"Execução abortada" já é gerada**,
+   mas vem com `kind: "error"` (vermelho) — deveria ser **`warning`** (o front já renderiza warning em âmbar).
+   Faltam ainda as notificações de **falha da placa** e **OTA**.
 
-5. **Verificar "Limpeza mock-stage"** — a nota de 2026-06-01 (abaixo) diz que a Limpeza da Manutenção é mock,
+4. **Verificar "Limpeza mock-stage"** — a nota de 2026-06-01 (abaixo) diz que a Limpeza da Manutenção é mock,
    mas o `MaintenanceService.CleanupAsync` já usa `ExecuteDelete` (deleção real). Confirmar e fechar a nota.
 
-6. **RS422 / hardware real + `LinuxSystemController`** — *grande, futuro.* Protocolo STM32 (RS422) e o SO do
+5. **Limpeza: categorias "Programas" e "Usuários ativos"** — *pedido do Lucas (2026-06-03).* O front já tem
+   as duas categorias prontas na Limpeza (Diagnóstico → Manutenção); elas aparecem **"vazio"** (desabilitadas)
+   até o backend mandar a contagem. Faltam dois pontos:
+   - `GET /api/maintenance/overview` → incluir em `database.categories` os ids **`programas`** (nº de programas
+     salvos + bytes) e **`usuarios`** (nº de usuários **ativos, exceto o autenticado** + bytes).
+   - `POST /api/maintenance/cleanup` → tratar **`programas`** (apaga todos os programas salvos — decidir se
+     mantém 1 default, igual ao factory-reset) e **`usuarios`** (apaga os usuários **ativos exceto quem
+     chamou**). A regra "exceto o logado" **tem de ser server-side** (pelo JWT) — o front manda só o id
+     `usuarios` e nunca decide quem poupar; ele apenas espelha a remoção no cache local.
+   - **Permissão (decidido com o Lucas, 2026-06-04):** limpar `programas` e `usuarios` é **só do Admin** — o
+     **Master NÃO pode** (exceção deliberada ao "Master ⊇ Admin"; em todo o resto o Master é superusuário).
+     O Master mantém visão **read-only do tamanho**, então o overview deve devolver as contagens dessas duas
+     **também para o Master** (ele vê, mas não limpa). O front já trava no cliente (cadeado + "Somente Admin",
+     não-selecionável) e nunca envia esses ids quando o autor é Master, mas o `POST /api/maintenance/cleanup`
+     **tem de rejeitar** `programas`/`usuarios` vindos de um Master (403/ignorar) — gating de front não é
+     segurança. Histórico (`execucoes`/`falhas`/`logs`/`inativos`) segue limpável por Admin **e** Master.
+
+6. **`osKernel` do overview vem como RID, não kernel** — *cosmético, escopo mínimo.*
+   `GET /api/maintenance/overview` devolve `osKernel: "ubuntu.24.04-x64"` (um Runtime Identifier do .NET). O
+   front mostra isso em **"Versão do Linux"** (Diagnóstico → Manutenção → Sistema). Devolver a versão real do
+   kernel (estilo `uname -r`, ex. `6.8.0-31-generic`) para o rótulo fazer sentido.
+
+7. **RS422 / hardware real + `LinuxSystemController`** — *grande, futuro.* Protocolo STM32 (RS422) e o SO do
    OrangePi (hoje `SimulatedPowerBoard` / `SimulatedSystemController`).
+
+8. **Precisão dos valores de programa (≤ 2 casas decimais)** — *pedido do Lucas (2026-06-04), feito no front.*
+   O front passou a arredondar `temp`/`tempo` dos segmentos/pontos para **no máx. 2 casas** antes de
+   `POST/PUT /api/programs` (define único `PROGRAM_VALUE_MAX_DECIMALS` em `lib/limits.ts`, aplicado na
+   fronteira `programStore.saveProgram`). Para defesa em profundidade, o backend deveria **validar/arredondar
+   igual** ao persistir um programa (e ao derivar a curva amostrada). **PID, calibração e demais configs ficam
+   de fora** — precisam de mais precisão.
+
+9. **Auditoria completa — "Log de Operação" (trilha genérica)** — ✅ **FEITO no backend (2026-06-04)** — falta a tela do front. *pedido do Lucas (2026-06-04); referência:
+   print accelero "LOG DE OPERAÇÃO" (em `~/Pictures/2026-06-04_11-00.png`). Decidido com ele: **especificar o
+   backend primeiro**; o front (visualizador) vem depois, contra o contrato abaixo.* Visão: "**tudo fica
+   registrado no BD**" — toda alteração, execução, erro, comunicação, login, calibração numa **única trilha de
+   auditoria, campo a campo**.
+
+   **Modelo (tabela única, append-only):**
+   `OperationLog { id, at (UTC), operatorId?, operatorName, category, type, object, objectId?, data (jsonb) }`
+   - `operatorName` = usuário; **"Sistema"** para eventos automáticos (comunicação, OTA, watchdog), com
+     `operatorId` nulo.
+   - `category` (a separação por **aba/filtro** do front — ver "Apresentação"): `Execucao | Alteracao | Usuario
+     | Erro | Comunicacao | Falha` (extensível: `Calibracao | Manutencao`). É a dimensão **grossa**; o `type`
+     abaixo é o detalhe fino dentro dela.
+     - **Erro × Falha (decidido com o Lucas 2026-06-04):** `Falha` = **faltas de hardware da placa** (E-1xx:
+       sobretemperatura, sobrecorrente, termopar, perda RS422…); `Erro` = **erros de software/operação**.
+       → **mover a falha-de-placa de `Erro` p/ `Falha`** no `AuditService.CategoryFor` (a "1 linha" que o
+       backend ofereceu). A perda de comunicação na partida segue em `Comunicacao`, como já está.
+   - `type` (TIPO; enum acento-free no wire): `Criacao | Alteracao | Remocao | Execucao | Erro | Comunicacao |
+     Login | Logout | Calibracao | Limpeza | ResetFabrica`.
+   - `object` (OBJETO): `Programa | Execucao | Falha | Usuario | Configuracao | Controlador | Sessao | …`.
+   - `objectId` (OBJETO ID): identificador do alvo (id do programa, nº da execução, username…).
+   - `data` (DADOS): **lista de campos** `[{ field, before?, after }]` — `before` ausente em eventos sem estado
+     anterior (execução, comunicação, login). Valores em JSON, escalar ou objeto, igual ao print
+     (`ocoMetadata → {"description":{…},"meta":{…}}`). **Nunca logar o valor de senha** — só "senha alterada".
+
+   **Cobertura (o que precisa gravar):**
+   - **Programa/Configuração** (Criação/Alteração/Remoção). *Já existe no ChangeLog (Relatórios → Alterações,
+     com diff antes/depois)* → **unificar**: o ChangeLog vira um subconjunto do OperationLog
+     (`type ∈ {Criacao,Alteracao,Remocao}`, `object ∈ {Programa,Configuracao}`) **sem regredir** o diff pronto.
+   - **Execução** (iniciada/concluída/abortada) e **Erro/Falha** da placa — podem ser entradas-resumo que
+     **referenciam** o registro detalhado existente (Execuções/Erros) via `objectId`.
+   - **Comunicação RS422 (NOVO)** — link sobe/cai, perda/retomada de comm com o STM32, "última comunicação"
+     (igual ao `conLastOnline` do print). Hoje só aparece como status na TopBar; **não é auditado**.
+   - **Usuário** (criar/editar/remover/ativar, troca de senha, reset), **Sessão** (login/logout e falhas),
+     **Calibração** (offsets/ganhos/PWM — Master), **Manutenção** (Limpeza: quem limpou quais categorias; Reset
+     de fábrica).
+
+   **Endpoint:** `GET /api/operation-log` paginado + filtros espelhando `ReportQuery` (page/pageSize, from/to,
+   search) **+** `category`, `operator`, `type`, `object`, `objectId`. (Futuro: push via SignalR p/ ao vivo.)
+
+   **Retenção & limpeza:** a auditoria deve ser **protegida da Limpeza** (como o "Registro de alterações" já é)
+   — política de retenção própria, server-side, nunca apagável pelo operador.
+
+   **Permissão (decidido com o Lucas 2026-06-04): Master-only** — igual à aba Diagnóstico → Log atual que ele
+   substitui (não `canAdminister`). O endpoint `GET /api/operation-log` deve exigir **Master** (403 p/
+   Admin/Regular); o front reusa o mesmo `isMaster`/sub-tab Master.
+
+   **Apresentação no front (refinado com o Lucas 2026-06-04):** o Log de Operação **substitui a aba
+   Diagnóstico → Log** atual (mensagens de sistema free-text — ele achou "feia"). Separação **por categoria**
+   (filtro/sub-abas): **Tudo** (histórico corrente, sem filtro) · **Execução** · **Alteração** · **Usuário** ·
+   **Erro** · **Comunicação** · **Falha** — cada uma = `?category=…`. **Paginação é obrigatória** (volume alto):
+   o endpoint já pagina e o front reusa o `Pagination` de Relatórios. O log de sistema antigo (INFO/Aviso/Erro
+   free-text) é substituído — mensagens de sistema podem cair na categoria `Erro`/`Sistema`. Segue
+   **Master-only** (decidido 2026-06-04 — ver Permissão).
+
+   **Contrato p/ o front (a confirmar antes de montar a tela):**
+   `OperationLogEntryDto { id; at; operatorName; operatorId?; category; type; object; objectId?; data: {field; before?; after}[] }`
+   \+ `PagedResult<OperationLogEntryDto>`. A tela espelha o print — **DATA · OPERADOR · TIPO · OBJETO · OBJETO
+   ID · DADOS** (campo em pill + valor JSON) — com os mesmos filtros/paginação de Relatórios (layout 1024×600).
+
+   **✅ FEITO (backend) 2026-06-04 — falta só a tela do front.**
+   - Tabela `OperationLog` (entidade + `OperationField` jsonb; enums `OperationCategory`/`OperationType`/
+     `OperationObject`, PascalCase acento-free; índices At/Category/Type/Object). Migration `AddOperationLog` aplicada.
+   - `AuditService.Record(...)` = chokepoint único; **deriva `category` de (type,object)** (zero churn nos call
+     sites); operador default = usuário autenticado, "Sistema" p/ automáticos; **nunca grava senha**.
+     `RecordProgram/ConfigChange` escrevem o ChangeLog (diff antes/depois **intacto**) **e** o OperationLog.
+   - Seams: Auth (login/técnico/falha/logout/troca de senha), User (CRUD + restaurar/expurgar), Calibração,
+     Manutenção (limpeza: quem limpou o quê / reset), SystemMonitor (servidor central + OTA = operador "Sistema"),
+     RunManager (execução iniciada/finalizada com status/duração/pico; falha→Erro com código/motivo; falha ao
+     iniciar na placa→Comunicação).
+   - `GET /api/operation-log` **Master-only** (403 Admin/Regular; auditoria protegida da Limpeza), filtros
+     search/from/to/before/page/pageSize **+** category/operator/type/object/objectId. 0 warnings, **50/50 testes**.
+   - **Contrato entregue = o acima**, com `category` antes de `type`; `before`/`after` são **strings** (um objeto
+     vem como JSON em string). O front já pode montar a tela contra isso.
+   - Follow-ups (não-bloqueantes): retenção/poda server-side; comunicação RS422 real do STM32 (o seam
+     Comunicação/Controlador existe, só não é exercido pelo `SimulatedPowerBoard`); demo-seed de linhas variadas.
 
 **Front (time do front):** tela **"Lixeira do Master"** (ver/restaurar/expurgar via `…/deleted` · `…/restore`
 · `…/purge`, MasterOnly) + remover a categoria "Alterações" da Limpeza — **backend já pronto**.
@@ -39,6 +141,39 @@ segredos reais de prod (Jwt/Master/Admin/Regular) + aplicar migrations no deploy
 ---
 
 ## ✅ Resolvidos
+
+### ⭐ Comparativo do Perfil em runs ao vivo (2026-06-03)
+A tabela "Comparativo do Perfil" do relatório ficava **vazia em toda execução real** — `RunManager.FinalizeAsync`
+montava `Trace`/`Points`/`Events` mas nunca preenchia `Comparison` (só os relatórios demo-seed tinham linhas).
+
+**Feito:**
+- `ProfileBuilder.StageBoundaries(segments)` — deriva os **estágios lógicos** (um por leg editável; colapsa os
+  12 sub-pontos da parábola no endpoint; `Fixo` segura a temperatura anterior).
+- `ProfileBuilder.BuildComparison(stages, samples)` — uma linha por estágio: **alvo programado × temp. medida
+  da grelha** no fim do estágio (interpolada das amostras) e **tempo programado × tempo real decorrido**. Um run
+  interrompido (abort/falha) **trunca** o estágio em que parou e **descarta** os que nunca começaram. O front
+  deriva a coluna "Desvio" daí (`tempReal − tempProg`, `timeReal − timeProg`).
+- `RunManager`: captura os estágios no `StartAsync` (de `Segments`, ou dos vértices do `Profile` para programas
+  de pontos como o catálogo seed) e preenche `Comparison = ProfileBuilder.BuildComparison(...)` no finalize.
+- Testes: 4 novos em `ProfileBuilderTests` (collapse de parábola, run limpo com desvio-zero de tempo, run abortado
+  truncado, sem amostras → vazio). Suíte: **45/45**.
+
+### Correções de relatórios: gráfico de falha (demo) + curva de "Alterações" (2026-06-03)
+Dois problemas achados ao revisar a tela de Relatórios:
+
+**(1) Execuções de falha sem gráfico — dados de demo, não proposital.** `DbSeeder.Demo.BuildExecution`
+preenchia `Points`/`Comparison`/`Events` mas **não** o `Trace` (snapshot multi-sinal) — só a aba Erros
+(`BuildError`) e a única `BuildLinkedFailureExecution` tinham. Execuções **reais** já recebem o `Trace` do
+`RunManager`; era lacuna só do gerador demo. **Feito:** `BuildExecution` agora gera `Trace` (curva limpa em
+run OK, assinatura de falha em run com erro — via novo parâmetro `faulted` em `BuildSnapshotSeries`).
+⚠️ **Requer re-seed** (limpar o BD) para os relatórios demo já existentes ganharem o gráfico.
+
+**(2) Curva de "Alterações" não batia com o programa — bug de lógica.** No caminho de **segmentos** (o que o
+editor gera), o snapshot do ChangeLog reconstruía a curva ignorando o **baseline (0,0)**, achatando
+**parábolas** em retas e plotando o **`Temp` bruto do `Fixo`** (que a curva real ignora). **Feito:**
+`ReportService` agora reconstrói a curva real via `ProfileBuilder.ToProfile` a partir dos vértices
+snapshotados (`Temp`/`TimeSec`/`Ramp`, já persistidos) — sem migration. Programas de pontos passam sem
+mudança (legs lineares). +1 teste novo + 1 ajustado; suíte 46/46.
 
 ### 1. Biblioteca de logger — "todo log possível no console"
 Quero todo log possível no console: quando o usuário logou, saiu, fez modificação, erro no BD, tudo.

@@ -174,6 +174,9 @@ public static partial class DbSeeder
             CreatedAt = startedAt.AddSeconds(duration),
             Points = points,
             Comparison = comparison,
+            // Multi-signal trace so the Execução detail renders a chart (a clean shape for a successful run,
+            // a fault signature for a failed one) — real runs get this from RunManager; the demo lacked it.
+            Trace = new FailureSnapshot { DurationSec = duration, Series = BuildSnapshotSeries(7 * i + 13, faulted: failed) },
             Events = events,
         };
     }
@@ -218,7 +221,7 @@ public static partial class DbSeeder
     /// trip); <paramref name="seed"/> varies the ripple phase, where the anomaly starts and how severe it is,
     /// so different errors look different.
     /// </summary>
-    private static List<SnapshotSeries> BuildSnapshotSeries(int seed)
+    private static List<SnapshotSeries> BuildSnapshotSeries(int seed, bool faulted = true)
     {
         double V(int salt) => Hash($"{seed}:{salt}") % 1000 / 1000.0;
         var ph = V(1) * 6.2832;             // ripple phase shift
@@ -227,7 +230,9 @@ public static partial class DbSeeder
 
         double[] Gen(Func<double, double> f) =>
             Enumerable.Range(0, SnapshotSamples).Select(k => Math.Round(f(k / (double)(SnapshotSamples - 1)), 1)).ToArray();
-        double Fault(double x) => x < faultPos ? 0 : (x - faultPos) / (1 - faultPos); // 0 → 1 after faultPos
+        // A clean (successful) run has no fault signature, so every `* Fault(x)` term vanishes and the base
+        // curves (S-curve temp, PWM ripple, fans spinning up) stand alone.
+        double Fault(double x) => !faulted || x < faultPos ? 0 : (x - faultPos) / (1 - faultPos); // 0 → 1 after faultPos
         double Ripple(double x, double freq) => Math.Sin(x * freq + ph);
 
         return

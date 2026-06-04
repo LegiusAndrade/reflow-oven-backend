@@ -155,6 +155,50 @@ public enum CleanupId
     [JsonStringEnumMemberName("inativos")] Inativos,
 }
 
+/// <summary>The coarse CATEGORY of an operation-log row — the front's sub-tab/filter dimension ("Tudo" = no
+/// filter). Derived from (type, object) at write time and stored indexed. Accent-free PascalCase wire.</summary>
+public enum OperationCategory
+{
+    Execucao,
+    Alteracao,
+    Usuario,
+    Erro,
+    Comunicacao,
+    Falha,
+    Calibracao,
+    Manutencao,
+}
+
+/// <summary>The TIPO column of the operation log ("Log de Operação"). The wire literal is the member name
+/// (accent-free PascalCase), like <see cref="UserType"/>; the DB stores the same text via PtBrEnumConverter.</summary>
+public enum OperationType
+{
+    Criacao,
+    Alteracao,
+    Remocao,
+    Execucao,
+    Erro,
+    Comunicacao,
+    Login,
+    Logout,
+    Calibracao,
+    Limpeza,
+    ResetFabrica,
+}
+
+/// <summary>The OBJETO column of the operation log — what the operation acted on.</summary>
+public enum OperationObject
+{
+    Programa,
+    Execucao,
+    Falha,
+    Usuario,
+    Configuracao,
+    Controlador,
+    Sessao,
+    Sistema,
+}
+
 /// <summary>Whether a stored execution-curve point is the programmed setpoint or the measured value.</summary>
 public enum ProfileRole
 {

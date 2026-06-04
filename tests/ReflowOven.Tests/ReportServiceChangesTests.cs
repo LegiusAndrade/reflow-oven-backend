@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ReflowOven.Application.Common;
 using ReflowOven.Application.Dtos;
 using ReflowOven.Application.Services;
 using ReflowOven.Domain.Entities;
@@ -94,9 +95,65 @@ public sealed class ReportServiceChangesTests
         Assert.Equal("changed", detail.Diff.Points[0].Status);
         Assert.Contains("temp", detail.Diff.Points[0].ChangedFields);
 
-        // BeforeCurve = removed + changed-before + unchanged (idx 1,2,3); AfterCurve = added + changed-after + unchanged (idx 1,2,4).
-        Assert.Equal(3, detail.BeforeCurve!.Count);
-        Assert.Equal(3, detail.AfterCurve!.Count);
+        // Curves are the REAL expanded setpoint profile, not bare vertices: the t=0 baseline is prepended,
+        // so before (idx 1,2,3) and after (idx 1,2,4) become 4 points each, starting at (0,0).
+        Assert.Equal(4, detail.BeforeCurve!.Count);
+        Assert.Equal(0d, detail.BeforeCurve[0].T);
+        Assert.Equal(0d, detail.BeforeCurve[0].Temp);
+        Assert.Equal(4, detail.AfterCurve!.Count);
+        Assert.Equal(0d, detail.AfterCurve[0].T);
+    }
+
+    [Fact]
+    public async Task ChangeAsync_rebuilds_real_curve_from_segments()
+    {
+        // A creation snapshot exactly as ProgramService.BuildPoints emits it for a segment-built program:
+        // per-leg vertices carrying cumulative time, the leg's raw temp and its ramp. The Fixo leg stores a
+        // raw temp (0 here) that the real curve must ignore (it holds the prior 150 °C).
+        await using var db = NewContext();
+        var id = Guid.NewGuid();
+        db.Changes.Add(new ChangeLogEntry
+        {
+            Id = id,
+            At = new DateTimeOffset(2026, 6, 3, 12, 0, 0, TimeSpan.Zero),
+            Action = ChangeAction.Criado,
+            Target = "Perfil Seg",
+            ProgramId = "prog-seg",
+            DetailKind = ChangeDetailKind.Program,
+            Points =
+            [
+                new() { Index = 1, Temp = 150, TimeSec = 90,  Ramp = RampShape.Linear,           Role = ChangePointRole.Added },
+                new() { Index = 2, Temp = 0,   TimeSec = 150, Ramp = RampShape.Fixo,             Role = ChangePointRole.Added },
+                new() { Index = 3, Temp = 220, TimeSec = 210, Ramp = RampShape.ParabolaPositiva, Role = ChangePointRole.Added },
+            ],
+        });
+        await db.SaveChangesAsync();
+
+        var detail = await new ReportService(db).ChangeAsync(id);
+        var after = detail.AfterCurve!;
+
+        // The rebuilt curve must equal the real expanded profile of the same legs.
+        var expected = ProfileBuilder.ToProfile(
+        [
+            new ProfileSegment { Temp = 150, DurationSec = 90, Ramp = RampShape.Linear },
+            new ProfileSegment { Temp = 0,   DurationSec = 60, Ramp = RampShape.Fixo },
+            new ProfileSegment { Temp = 220, DurationSec = 60, Ramp = RampShape.ParabolaPositiva },
+        ]);
+        Assert.Equal(expected.Count, after.Count);
+        for (var k = 0; k < expected.Count; k++)
+        {
+            Assert.Equal(expected[k].T, after[k].T, 3);
+            Assert.Equal(expected[k].Temp, after[k].Temp, 3);
+        }
+
+        Assert.Equal(0d, after[0].T);   // baseline restored
+        Assert.Equal(0d, after[0].Temp);
+        var fixoPoint = after.First(p => Math.Abs(p.T - 150) < 0.5);
+        Assert.Equal(150d, fixoPoint.Temp); // Fixo holds the prior temp, not its raw stored 0
+        // Parabola is a real curve, not a chord: a positive parabola bows below the straight 150→220 line.
+        var mid = after.First(p => p.T > 150 && p.T < 210);
+        Assert.True(mid.Temp < 150 + (220 - 150) * ((mid.T - 150) / 60), "parabola should bow below the chord");
+        Assert.Equal(220d, after[^1].Temp);
     }
 
     // ---- helpers ---------------------------------------------------------

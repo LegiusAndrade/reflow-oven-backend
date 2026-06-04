@@ -1,8 +1,11 @@
 namespace ReflowOven.Application.Services;
 
 /// <summary>
-/// Emits ChangeLogEntry audit rows and bumps per-user activity counters. Methods only stage the
-/// changes on the context; the calling service owns the SaveChanges so the whole mutation is one unit.
+/// Emits audit rows — the per-program/config <see cref="ChangeLogEntry"/> (Relatórios → Alterações, with the
+/// rich before/after diff) AND the universal <see cref="OperationLogEntry"/> (Log de Operação) — and bumps
+/// per-user activity counters. Methods only stage the changes on the context; the calling service owns the
+/// SaveChanges so the whole mutation is one unit. The change methods write BOTH logs, so a program or config
+/// edit appears in Alterações (detailed) and in the Log de Operação (summary row).
 /// </summary>
 public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser current, ILogger<AuditService> logger)
 {
@@ -21,6 +24,31 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
         stat.Count++;
     }
 
+    /// <summary>
+    /// Stage one row on the universal operation log. The operator defaults to the authenticated user; pass
+    /// <paramref name="operatorId"/>/<paramref name="operatorName"/> for system or run-context events (a
+    /// background tick, a login — where there is no signed-in <see cref="ICurrentUser"/> yet). A null operator
+    /// is shown as "Sistema". <b>Never put a password value in <paramref name="data"/>.</b> The caller owns
+    /// the SaveChanges so this stays in the same unit of work as the mutation it records.
+    /// </summary>
+    public void Record(
+        OperationType type, OperationObject obj, string? objectId,
+        IReadOnlyList<OperationField>? data = null, Guid? operatorId = null, string? operatorName = null)
+    {
+        db.OperationLog.Add(new OperationLogEntry
+        {
+            Id = Guid.NewGuid(),
+            At = clock.UtcNow,
+            OperatorId = operatorId ?? current.UserId,
+            OperatorName = operatorName ?? current.Name ?? "Sistema",
+            Category = CategoryFor(type, obj),
+            Type = type,
+            Object = obj,
+            ObjectId = objectId,
+            Data = data?.ToList() ?? [],
+        });
+    }
+
     public void RecordProgramChange(ChangeAction action, ReflowProgram program, IReadOnlyList<ChangePointRow>? points = null)
     {
         logger.LogInformation("Programa {Action}: '{Target}' por '{Actor}'.", action, program.Name, current.Name ?? "sistema");
@@ -36,6 +64,8 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
             DetailKind = ChangeDetailKind.Program,
             Points = points?.ToList() ?? [],
         });
+        // Mirror into the universal trail — the detailed point diff stays in the ChangeLog above.
+        Record(ToOperationType(action), OperationObject.Programa, program.Id, [OperationField.Of("programa", program.Name)]);
     }
 
     public void RecordConfigChange(IReadOnlyList<string> bullets)
@@ -52,5 +82,26 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
             DetailKind = ChangeDetailKind.Config,
             ConfigBullets = [.. bullets],
         });
+        Record(OperationType.Alteracao, OperationObject.Configuracao, null, [.. bullets.Select(b => OperationField.Of("configuração", b))]);
     }
+
+    // Criado → Criacao, Editado → Alteracao, Removido → Remocao.
+    private static OperationType ToOperationType(ChangeAction a) => a switch
+    {
+        ChangeAction.Criado => OperationType.Criacao,
+        ChangeAction.Removido => OperationType.Remocao,
+        _ => OperationType.Alteracao,
+    };
+
+    // Coarse bucket for the front's sub-tabs, derived once at write time (indexed for ?category= filtering).
+    private static OperationCategory CategoryFor(OperationType type, OperationObject obj) => type switch
+    {
+        OperationType.Execucao => OperationCategory.Execucao,
+        OperationType.Erro => OperationCategory.Erro,
+        OperationType.Comunicacao => OperationCategory.Comunicacao,
+        OperationType.Calibracao => OperationCategory.Calibracao,
+        OperationType.Limpeza or OperationType.ResetFabrica => OperationCategory.Manutencao,
+        OperationType.Login or OperationType.Logout => OperationCategory.Usuario,
+        _ => obj == OperationObject.Usuario ? OperationCategory.Usuario : OperationCategory.Alteracao,
+    };
 }

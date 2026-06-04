@@ -4,7 +4,7 @@ namespace ReflowOven.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public sealed class AuthController(AuthService auth, UserService users, ILogger<AuthController> logger) : ControllerBase
+public sealed class AuthController(AuthService auth, UserService users) : ControllerBase
 {
     [AllowAnonymous]
     [HttpPost("login")]
@@ -14,12 +14,13 @@ public sealed class AuthController(AuthService auth, UserService users, ILogger<
     [HttpPost("forgot-password")]
     public Task<OkResponse> ForgotPassword([FromBody] ForgotPasswordRequest req, CancellationToken ct) => auth.ForgotPasswordAsync(req, ct);
 
-    /// <summary>Stateless logout (the client discards the JWT). Recorded for the audit/security log.</summary>
+    /// <summary>Stateless logout (the client discards the JWT). Recorded on the operation log.</summary>
     [HttpPost("logout")]
-    public IActionResult Logout()
+    public async Task<IActionResult> Logout(CancellationToken ct)
     {
         var name = User.FindFirst(ClaimTypes.Name)?.Value ?? "desconhecido";
-        logger.LogInformation("Logout: '{User}'.", name);
+        Guid? uid = Guid.TryParse(User.FindFirst("sub")?.Value, out var g) ? g : null;
+        await auth.LogoutAsync(uid, name, ct);
         return NoContent();
     }
 

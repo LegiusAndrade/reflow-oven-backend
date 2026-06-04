@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
-public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds)
+public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds, AuditService audit)
 {
     /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
     /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
@@ -55,6 +55,12 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                 _ => 0,
             };
         }
+        audit.Record(OperationType.Limpeza, OperationObject.Configuracao, null,
+        [
+            OperationField.Of("categorias", string.Join(", ", categories.Distinct().Select(c => EnumWire.ToWire(c)))),
+            OperationField.Of("removidos", deleted),
+        ]);
+        await db.SaveChangesAsync(ct);
         return new CleanupResultDto(deleted);
     }
 
@@ -70,6 +76,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         await db.Errors.ExecuteDeleteAsync(ct);
         await db.Changes.ExecuteDeleteAsync(ct);
         await db.SystemLog.ExecuteDeleteAsync(ct);
+        await db.OperationLog.ExecuteDeleteAsync(ct);
         // IgnoreQueryFilters so the reset also wipes soft-deleted rows (the global filters hide them otherwise).
         await db.Favorites.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
         await db.PasswordResetTokens.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
@@ -104,6 +111,10 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         await db.Calibrations.ExecuteDeleteAsync(ct);
         db.Calibrations.Add(Defaults.Calibration());
 
+        await db.SaveChangesAsync(ct);
+
+        // The reset itself is audited — the first row of the fresh operation log.
+        audit.Record(OperationType.ResetFabrica, OperationObject.Sistema, null, [OperationField.Of("confirmacao", "RESETAR")]);
         await db.SaveChangesAsync(ct);
     }
 

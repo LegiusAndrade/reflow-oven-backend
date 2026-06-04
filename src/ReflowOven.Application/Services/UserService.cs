@@ -60,6 +60,8 @@ public sealed class UserService(
         };
         db.Users.Add(user);
         await audit.BumpActivityAsync(Defaults.ActivityLabels[1], ct); // usuários criados
+        audit.Record(OperationType.Criacao, OperationObject.Usuario, user.Name,
+            [OperationField.Of("email", user.Email), OperationField.Of("tipo", user.Type), OperationField.Of("status", user.Status)]);
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Usuário criado: '{Name}' ({Type}) por '{Actor}'.", user.Name, user.Type, current.Name);
 
@@ -91,9 +93,14 @@ public sealed class UserService(
         if (!willBeActiveAdmin && await IsLastActiveAdminAsync(user.Id, ct))
             throw new ConflictException("Deve haver ao menos um administrador ativo.");
 
+        var beforeEmail = user.Email;
+        var beforeType = user.Type;
+        var beforeStatus = user.Status;
+
         user.Email = email;
         user.Type = req.Type;
         user.Status = req.Status;
+        var passwordChanged = false;
         if (!string.IsNullOrEmpty(req.Password))
         {
             Validation.ValidatePassword(req.Password);
@@ -101,9 +108,18 @@ public sealed class UserService(
             // An admin deliberately set a known password — clear the forced-change cycle.
             user.MustChangePassword = false;
             user.PasswordChangedAt = clock.UtcNow;
+            passwordChanged = true;
         }
 
+        // Audit the actual diff (never the password value — only that it changed).
+        var changes = new List<OperationField>();
+        if (!string.Equals(beforeEmail, user.Email, StringComparison.OrdinalIgnoreCase)) changes.Add(OperationField.Change("email", beforeEmail, user.Email));
+        if (beforeType != user.Type) changes.Add(OperationField.Change("tipo", beforeType, user.Type));
+        if (beforeStatus != user.Status) changes.Add(OperationField.Change("status", beforeStatus, user.Status));
+        if (passwordChanged) changes.Add(OperationField.Of("senha", "alterada"));
+
         await audit.BumpActivityAsync(Defaults.ActivityLabels[2], ct); // usuários alterados
+        audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name, changes);
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Usuário atualizado: '{Name}' ({Type}/{Status}) por '{Actor}'.", user.Name, user.Type, user.Status, current.Name);
         return Map(user);
@@ -152,6 +168,7 @@ public sealed class UserService(
         user.DeletedAt = clock.UtcNow;
         user.DeletedBy = current.Name;
         await audit.BumpActivityAsync(Defaults.ActivityLabels[3], ct); // usuários deletados
+        audit.Record(OperationType.Remocao, OperationObject.Usuario, user.Name, [OperationField.Of("tipo", user.Type)]);
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Usuário removido (soft): '{Name}' por '{Actor}'.", user.Name, current.Name);
     }
@@ -175,6 +192,7 @@ public sealed class UserService(
         user.IsDeleted = false;
         user.DeletedAt = null;
         user.DeletedBy = null;
+        audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name, [OperationField.Of("restaurado", "sim")]);
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Usuário restaurado: '{Name}' por '{Actor}'.", user.Name, current.Name);
         return Map(user);
@@ -187,6 +205,7 @@ public sealed class UserService(
             .FirstOrDefaultAsync(u => u.Id == id && u.IsDeleted && u.Type != UserType.Master, ct)
             ?? throw new NotFoundException("Usuário apagado não encontrado.");
         db.Users.Remove(user);
+        audit.Record(OperationType.Remocao, OperationObject.Usuario, user.Name, [OperationField.Of("expurgado", "definitivo")]);
         await db.SaveChangesAsync(ct);
         logger.LogWarning("Usuário expurgado (definitivo): '{Name}' por '{Actor}'.", user.Name, current.Name);
     }

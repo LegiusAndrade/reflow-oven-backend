@@ -32,6 +32,8 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
     public DbSet<DeviceInfo> DeviceInfo => Set<DeviceInfo>();
     public DbSet<Board> Boards => Set<Board>();
 
+    public DbSet<OperationLogEntry> OperationLog => Set<OperationLogEntry>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
@@ -150,6 +152,19 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(x => x.ProgramId).HasMaxLength(64);
             e.OwnsMany(x => x.Points, o => o.ToJson());
             e.HasIndex(x => x.At);
+        });
+
+        // Universal audit trail (Log de Operação). Append-only; Data is the jsonb DADOS payload.
+        b.Entity<OperationLogEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OperatorName).HasMaxLength(40);
+            e.Property(x => x.ObjectId).HasMaxLength(64);
+            e.OwnsMany(x => x.Data, o => o.ToJson());
+            e.HasIndex(x => x.At);
+            e.HasIndex(x => x.Category);
+            e.HasIndex(x => x.Type);
+            e.HasIndex(x => x.Object);
         });
 
         b.Entity<SystemLogEntry>(e =>

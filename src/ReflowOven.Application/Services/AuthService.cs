@@ -12,6 +12,7 @@ public sealed class AuthService(
     ITechnicianCredentials technician,
     IEmailSender email,
     ICurrentUser current,
+    AuditService audit,
     ILogger<AuthService> logger)
 {
     public async Task<LoginResult> LoginAsync(LoginRequest req, CancellationToken ct = default)
@@ -28,6 +29,8 @@ public sealed class AuthService(
         if (string.Equals(username, technician.Username, StringComparison.OrdinalIgnoreCase) && technician.Verify(password))
         {
             logger.LogInformation("Login OK: técnico '{User}' (Calibração).", username);
+            audit.Record(OperationType.Login, OperationObject.Sessao, "calibracao", [OperationField.Of("papel", "Técnico (Calibração)")], operatorName: "Técnico");
+            await db.SaveChangesAsync(ct);
             var t = jwt.CreateForCalibration();
             var session = new SessionDto("calibration", "Calibração", UserType.Admin, t.IssuedAtUnixMs, true);
             return LoginResult.Success(t.Token, t.ExpiresAt, session);
@@ -35,20 +38,29 @@ public sealed class AuthService(
 
         var lower = username.ToLowerInvariant();
         var user = await db.Users.FirstOrDefaultAsync(u => u.Name.ToLower() == lower, ct);
+
+        // SECURITY: never disclose which of the username/password was wrong. A distinct "user not found"
+        // vs "wrong password" lets an attacker enumerate valid usernames, so both return the SAME generic
+        // message. We also run one hash for a missing user so the two cases take the same time — otherwise
+        // the response latency itself is an enumeration oracle (existing user = slow BCrypt verify).
+        var passwordOk = user is not null && hasher.Verify(password, user.PasswordHash);
         if (user is null)
+            _ = hasher.Hash(password); // burn an equivalent BCrypt cost; result discarded
+
+        if (user is null || !passwordOk)
         {
-            logger.LogWarning("Login falhou: usuário '{User}' não encontrado.", username);
-            return LoginResult.Fail("Usuário não encontrado.");
+            logger.LogWarning("Login falhou: credenciais inválidas para '{User}'.", username);
+            audit.Record(OperationType.Login, OperationObject.Sessao, username, [OperationField.Of("resultado", "falha")], operatorName: username);
+            await db.SaveChangesAsync(ct);
+            return LoginResult.Fail("Usuário ou senha incorretos.");
         }
+
+        // Reachable only once the password is correct, so surfacing an inactive account leaks no existence
+        // to an attacker (they'd already need valid credentials) while still telling a real user why.
         if (user.Status == UserStatus.Inativo)
         {
             logger.LogWarning("Login falhou: usuário '{User}' está inativo.", user.Name);
             return LoginResult.Fail("Usuário inativo.");
-        }
-        if (!hasher.Verify(password, user.PasswordHash))
-        {
-            logger.LogWarning("Login falhou: senha incorreta para '{User}'.", user.Name);
-            return LoginResult.Fail("Senha incorreta.");
         }
 
         var now = clock.UtcNow;
@@ -90,6 +102,7 @@ public sealed class AuthService(
 
         user.LastLogin = now;
         user.LoginCount++;
+        audit.Record(OperationType.Login, OperationObject.Sessao, user.Name, [OperationField.Of("papel", user.Type)], operatorId: user.Id, operatorName: user.Name);
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Login OK: '{User}' ({Type}).", user.Name, user.Type);
@@ -122,10 +135,20 @@ public sealed class AuthService(
         // The user now owns their password — clear the issued-password deadline anchor + reminder throttle.
         user.PasswordIssuedAt = null;
         user.LastPasswordReminderAt = null;
+        audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name, [OperationField.Of("senha", "alterada")], operatorId: user.Id, operatorName: user.Name);
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Senha alterada por '{User}'.", user.Name);
         return new OkResponse();
+    }
+
+    /// <summary>Stateless logout (the client discards the JWT) — recorded on the operation log for the
+    /// security/audit trail. The caller supplies the identity from the JWT claims.</summary>
+    public async Task LogoutAsync(Guid? userId, string userName, CancellationToken ct = default)
+    {
+        audit.Record(OperationType.Logout, OperationObject.Sessao, userName, operatorId: userId, operatorName: userName);
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Logout: '{User}'.", userName);
     }
 
     /// <summary>Enumeration-safe: always reports success even if the email is unknown.</summary>

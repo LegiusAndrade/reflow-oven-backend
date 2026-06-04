@@ -21,6 +21,7 @@ public interface IAppDbContext
 
     DbSet<ChangeLogEntry> Changes { get; }
     DbSet<SystemLogEntry> SystemLog { get; }
+    DbSet<OperationLogEntry> OperationLog { get; }
     DbSet<Notification> Notifications { get; }
 
     DbSet<Settings> Settings { get; }

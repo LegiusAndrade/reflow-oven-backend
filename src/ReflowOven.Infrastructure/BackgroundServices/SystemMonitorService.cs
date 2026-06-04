@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ReflowOven.Application.Services;
 using ReflowOven.Infrastructure.Platform;
 
 namespace ReflowOven.Infrastructure.BackgroundServices;
@@ -29,28 +30,37 @@ public sealed class SystemMonitorService(
     {
         var period = TimeSpan.FromSeconds(Math.Max(10, options.Value.MonitorIntervalSeconds));
         using var timer = new PeriodicTimer(period);
-        do
+        try
         {
-            try
+            do
             {
-                await PollAsync(stoppingToken);
+                try
+                {
+                    await PollAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw; // shutdown: bubble to the outer handler so the loop ends cleanly
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Falha no monitor de sistema (servidor central / atualização).");
+                }
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Falha no monitor de sistema (servidor central / atualização).");
-            }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown — the stopping token cancels PollAsync or WaitForNextTickAsync. Swallow it
+            // so it isn't surfaced as unhandled (the debugger was flagging this) and the service stops cleanly.
+        }
     }
 
     private async Task PollAsync(CancellationToken ct)
     {
         var online = await system.PingCentralServerAsync(ct);
         if (_lastOnline is bool prev && prev != online)
+        {
             await RaiseAsync(
                 online ? NotificationFeedKind.Info : NotificationFeedKind.Error,
                 online ? "Servidor central reconectado" : "Servidor central inacessível",
@@ -58,6 +68,9 @@ public sealed class SystemMonitorService(
                     ? "A conexão com o servidor central foi restabelecida."
                     : "O dispositivo perdeu a conexão com o servidor central.",
                 ct);
+            await RecordCommAsync(OperationObject.Controlador, "servidor-central",
+                [OperationField.Of("estado", online ? "online" : "offline")], ct);
+        }
         _lastOnline = online;
 
         var update = await system.GetUpdateStatusAsync(ct);
@@ -72,6 +85,7 @@ public sealed class SystemMonitorService(
             {
                 await RaiseAsync(NotificationFeedKind.Update, "Atualização disponível",
                     $"Nova versão {v} disponível para instalação.", ct);
+                await RecordCommAsync(OperationObject.Sistema, "ota", [OperationField.Of("versao", v)], ct);
                 _lastNotifiedVersion = v;
             }
         }
@@ -146,5 +160,23 @@ public sealed class SystemMonitorService(
 
         logger.LogInformation("Notificação gerada: {Kind} — {Title}", kind, title);
         await systemLog.PublishAsync(new ReflowOven.Application.Dtos.SystemLogDto(logEntry.Id, logEntry.At, logEntry.Level, logEntry.Message));
+    }
+
+    /// <summary>Append one "Sistema"-operator <c>Comunicacao</c> row to the universal operation log (central
+    /// server link changes, OTA availability). Best-effort: a failure must not stop the monitor loop.</summary>
+    private async Task RecordCommAsync(OperationObject obj, string objectId, IReadOnlyList<OperationField> fields, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var audit = scope.ServiceProvider.GetRequiredService<AuditService>();
+            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            audit.Record(OperationType.Comunicacao, obj, objectId, fields, operatorName: "Sistema");
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Falha ao auditar evento de comunicação ({Object}/{ObjectId}).", obj, objectId);
+        }
     }
 }
