@@ -17,6 +17,15 @@ public sealed class ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionM
                 ex.StatusCode, context.Request.Method, context.Request.Path, ex.Message);
             await WriteProblemAsync(context, ex.StatusCode, ex.Message);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The client disconnected before the response finished (rapid navigation, a superseded fetch,
+            // React StrictMode's double request). Not a server error — log it quietly (Debug, hidden at the
+            // Information console level) and don't try to write a 500 to a socket that is already gone.
+            logger.LogDebug("Requisição cancelada pelo cliente em {Method} {Path}.", context.Request.Method, context.Request.Path);
+            if (!context.Response.HasStarted)
+                context.Response.StatusCode = 499; // client closed request (nginx convention)
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Erro não tratado em {Method} {Path}.", context.Request.Method, context.Request.Path);

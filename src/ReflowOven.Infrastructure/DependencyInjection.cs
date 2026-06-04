@@ -24,9 +24,17 @@ public static class DependencyInjection
             Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
         services.AddDbContext<ReflowDbContext>(opt =>
         {
-            opt.UseNpgsql(config.GetConnectionString("Default"));
-            // In dev, surface full DB error detail (failing column/parameter values) in the logs.
-            if (isDevelopment) opt.EnableDetailedErrors().EnableSensitiveDataLogging();
+            // The only query that loads two collections is the tiny Settings singleton (~11 notification rows ×
+            // 7 chart-series rows), so a single query with that small cartesian product is the cheap, correct
+            // choice — make it the explicit default, which also silences EF's MultipleCollectionIncludeWarning.
+            opt.UseNpgsql(config.GetConnectionString("Default"),
+                o => o.UseQuerySplittingBehavior(Microsoft.EntityFrameworkCore.QuerySplittingBehavior.SingleQuery));
+            // In dev, surface full DB error detail (failing column/parameter values) in the logs. The
+            // capability stays on for exceptions, but the one-time "sensitive data logging is enabled"
+            // boot nag is silenced so it doesn't shout on every startup.
+            if (isDevelopment)
+                opt.EnableDetailedErrors().EnableSensitiveDataLogging()
+                    .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.SensitiveDataLoggingEnabledWarning));
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<ReflowDbContext>());
 

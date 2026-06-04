@@ -84,6 +84,8 @@ public sealed class SettingsService(IAppDbContext db, IPowerBoard board, ISystem
     }
 
     private async Task<Settings> LoadAsync(CancellationToken ct) =>
+        // Loads two collections (Notifications + RunSeries); the single-query splitting default is set globally
+        // in Infrastructure (AddInfrastructure) — both are tiny fixed config sets, so one query is the cheap choice.
         await db.Settings.Include(x => x.Notifications).Include(x => x.RunSeries).FirstOrDefaultAsync(x => x.Id == 1, ct)
         ?? throw new NotFoundException("Configurações não inicializadas.");
 

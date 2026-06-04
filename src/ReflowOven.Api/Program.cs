@@ -207,8 +207,26 @@ if (args.Contains("seed-only"))
 // --- Pipeline ---------------------------------------------------------------------------
 app.UseMiddleware<ExceptionMiddleware>();
 
-// One concise line per HTTP request (method, path, status, elapsed ms) — and the SignalR handshakes.
-app.UseSerilogRequestLogging();
+// One concise line per HTTP request — method, path + query string, status, elapsed ms (and SignalR
+// handshakes). The query string is logged so filtered endpoints stay legible: e.g. the Log de Operação's
+// sub-tabs all hit /api/operation-log but with a different ?category=. Noise is demoted to Verbose (below
+// the console threshold): CORS preflight (OPTIONS), health/Scalar/OpenAPI polls, and client-cancelled
+// requests (the browser aborting a superseded fetch — not a server error). Real failures stay Error.
+app.UseSerilogRequestLogging(options =>
+{
+    options.MessageTemplate = "HTTP {RequestMethod} {RequestPath}{RequestQueryString} responded {StatusCode} in {Elapsed:0.0000} ms";
+    options.EnrichDiagnosticContext = (diag, ctx) =>
+        diag.Set("RequestQueryString", ctx.Request.QueryString.HasValue ? ctx.Request.QueryString.Value : "");
+    options.GetLevel = (ctx, _, ex) =>
+        ex is OperationCanceledException && ctx.RequestAborted.IsCancellationRequested ? LogEventLevel.Verbose
+        : ex is not null || ctx.Response.StatusCode >= 500 ? LogEventLevel.Error
+        : HttpMethods.IsOptions(ctx.Request.Method)
+            || ctx.Request.Path.StartsWithSegments("/health")
+            || ctx.Request.Path.StartsWithSegments("/scalar")
+            || ctx.Request.Path.StartsWithSegments("/openapi")
+            ? LogEventLevel.Verbose
+            : LogEventLevel.Information;
+});
 
 if (app.Environment.IsDevelopment())
 {
