@@ -9,13 +9,16 @@ public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board)
     {
         rank = Math.Clamp(rank, DomainConstants.DiagRankMin, DomainConstants.DiagRankMax);
 
+        // The dev Master is a hidden superuser — it must never surface in any count or ranking shown to an
+        // Admin/Regular (it isn't in the Usuários list either), so every user query here excludes it.
+        var visibleUsers = db.Users.Where(u => u.Type != UserType.Master);
         var stats = new DiagnosticsStatsDto(
             Programs: await db.Programs.CountAsync(ct),
             Executions: await db.Executions.CountAsync(ct),
             Failures: await db.Errors.CountAsync(ct),
-            ActiveUsers: await db.Users.CountAsync(u => u.Status == UserStatus.Ativo, ct),
-            InactiveUsers: await db.Users.CountAsync(u => u.Status == UserStatus.Inativo, ct),
-            Admins: await db.Users.CountAsync(u => u.Type == UserType.Admin, ct));
+            ActiveUsers: await visibleUsers.CountAsync(u => u.Status == UserStatus.Ativo, ct),
+            InactiveUsers: await visibleUsers.CountAsync(u => u.Status == UserStatus.Inativo, ct),
+            Admins: await visibleUsers.CountAsync(u => u.Type == UserType.Admin, ct));
 
         var counts = await db.Errors.GroupBy(e => e.FaultTypeCode)
             .Select(g => new { Code = g.Key, Count = g.Count() })
@@ -26,7 +29,7 @@ public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board)
             .OrderByDescending(f => f.Count).ThenBy(f => f.Code)
             .ToList();
 
-        var topUsers = await db.Users
+        var topUsers = await visibleUsers
             .OrderByDescending(u => u.LoginCount).ThenBy(u => u.Name).Take(rank)
             .Select(u => new RankedUserDto(u.Id.ToString(), u.Name, u.LoginCount))
             .ToListAsync(ct);

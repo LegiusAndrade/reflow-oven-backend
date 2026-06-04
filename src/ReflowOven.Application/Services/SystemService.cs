@@ -87,10 +87,12 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
     /// </summary>
     public async Task<DatabaseAuditDto> GetDatabaseAuditAsync(CancellationToken ct = default)
     {
-        // Users — by status and role.
-        var usersTotal = await db.Users.CountAsync(ct);
-        var usersActive = await db.Users.CountAsync(u => u.Status == UserStatus.Ativo, ct);
-        var admins = await db.Users.CountAsync(u => u.Type == UserType.Admin, ct);
+        // Users — by status and role. The dev Master is a hidden superuser: it must never be counted in data
+        // an Admin can read (it isn't in the Usuários list either), so exclude it from every user count here.
+        var visibleUsers = db.Users.Where(u => u.Type != UserType.Master);
+        var usersTotal = await visibleUsers.CountAsync(ct);
+        var usersActive = await visibleUsers.CountAsync(u => u.Status == UserStatus.Ativo, ct);
+        var admins = await visibleUsers.CountAsync(u => u.Type == UserType.Admin, ct);
 
         // Programs — bypass the soft-delete/seed query filter to count everything.
         var allPrograms = db.Programs.IgnoreQueryFilters();

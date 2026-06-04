@@ -14,6 +14,7 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
     {
         var uid = current.UserId;
         if (uid is null) return; // technician/anonymous: no per-user counter
+        if (current.Role == UserType.Master) return; // the hidden Master accrues no visible activity counters
 
         // The caller's token can outlive its user row — the account was purged, or a dev re-seed gave users
         // new ids — so a stale id here would fail the WHOLE mutation with a FK violation. The counter is a
@@ -57,36 +58,42 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
     public void RecordProgramChange(ChangeAction action, ReflowProgram program, IReadOnlyList<ChangePointRow>? points = null)
     {
         logger.LogInformation("Programa {Action}: '{Target}' por '{Actor}'.", action, program.Name, current.Name ?? "sistema");
-        db.Changes.Add(new ChangeLogEntry
-        {
-            Id = Guid.NewGuid(),
-            At = clock.UtcNow,
-            Action = action,
-            Target = program.Name,
-            UserId = current.UserId,
-            UserName = current.Name,
-            ProgramId = program.Id,
-            DetailKind = ChangeDetailKind.Program,
-            Points = points?.ToList() ?? [],
-        });
-        // Mirror into the universal trail — the detailed point diff stays in the ChangeLog above.
+        // The dev Master is hidden from Admin-visible screens — its changes (and their counts) go ONLY to the
+        // Master-only Log de Operação below, never to the shared Alterações/ChangeLog the Admin reads.
+        if (current.Role != UserType.Master)
+            db.Changes.Add(new ChangeLogEntry
+            {
+                Id = Guid.NewGuid(),
+                At = clock.UtcNow,
+                Action = action,
+                Target = program.Name,
+                UserId = current.UserId,
+                UserName = current.Name,
+                ProgramId = program.Id,
+                DetailKind = ChangeDetailKind.Program,
+                Points = points?.ToList() ?? [],
+            });
+        // Mirror into the universal trail (kept even for the Master — the Log de Operação is Master-only).
         Record(ToOperationType(action), OperationObject.Programa, program.Id, [OperationField.Of("programa", program.Name)]);
     }
 
     public void RecordConfigChange(IReadOnlyList<string> bullets)
     {
         logger.LogInformation("Configuração alterada por '{Actor}': {Changes}.", current.Name ?? "sistema", string.Join("; ", bullets));
-        db.Changes.Add(new ChangeLogEntry
-        {
-            Id = Guid.NewGuid(),
-            At = clock.UtcNow,
-            Action = ChangeAction.Editado,
-            Target = "Configuração do sistema",
-            UserId = current.UserId,
-            UserName = current.Name,
-            DetailKind = ChangeDetailKind.Config,
-            ConfigBullets = [.. bullets],
-        });
+        // Master changes stay out of the Admin-visible Alterações/ChangeLog (and its counts) — only the
+        // Master-only Log de Operação keeps them.
+        if (current.Role != UserType.Master)
+            db.Changes.Add(new ChangeLogEntry
+            {
+                Id = Guid.NewGuid(),
+                At = clock.UtcNow,
+                Action = ChangeAction.Editado,
+                Target = "Configuração do sistema",
+                UserId = current.UserId,
+                UserName = current.Name,
+                DetailKind = ChangeDetailKind.Config,
+                ConfigBullets = [.. bullets],
+            });
         Record(OperationType.Alteracao, OperationObject.Configuracao, null, [.. bullets.Select(b => OperationField.Of("configuração", b))]);
     }
 

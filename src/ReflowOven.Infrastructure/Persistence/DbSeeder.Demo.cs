@@ -56,6 +56,10 @@ public static partial class DbSeeder
 
         var users = await db.Users.OrderBy(u => u.CreatedAt).ToListAsync(ct);
         if (users.Count == 0) return;
+        // Demo executions/errors/changes are NEVER attributed to the hidden Master — it must not surface in any
+        // Admin-visible report (Execuções/Erros/Alterações). (Login/activity stats below aren't shown for the
+        // Master either, so those can stay on the full list.)
+        var attributable = users.Where(u => u.Type != UserType.Master).ToList();
 
         // --- Bulk demo programs (so the gallery + reports reference ~200 programs) ----------------------
         if (await db.Programs.CountAsync(ct) < DemoProgramCount)
@@ -95,7 +99,7 @@ public static partial class DbSeeder
             for (var i = 0; i < DemoExecutions; i++)
             {
                 var program = programs[i % programs.Count];
-                var user = users[i % users.Count];
+                var user = attributable[i % attributable.Count];
                 var fault = i % 4 == 3 && faults.Count > 0 ? faults[i % faults.Count] : null;
 
                 var (exec, error) = BuildRun(i, now, program, user, fault);
@@ -114,7 +118,7 @@ public static partial class DbSeeder
         if (faults.Count > 0 && await db.Errors.CountAsync(ct) < DemoStandaloneErrors)
             for (var i = 0; i < DemoStandaloneErrors; i++)
             {
-                var user = users[i % users.Count];
+                var user = attributable[i % attributable.Count];
                 var error = BuildErrorFor(900 + i, now.AddDays(-(i + 1)).AddHours(-(i % 9)),
                     faults[i % faults.Count], programs[i % programs.Count], user);
                 db.Errors.Add(error);
@@ -128,13 +132,13 @@ public static partial class DbSeeder
         {
             for (var i = 0; i < DemoChanges; i++)
             {
-                var c = BuildChange(i, now, programs, users);
+                var c = BuildChange(i, now, programs, attributable);
                 db.Changes.Add(c);
                 ops.Add(OpRowForChange(c));
             }
 
             var churnProgram = await SeedEditChurnProgramAsync(db, now, ct);
-            foreach (var c in BuildEditChurnHistory(churnProgram, now, users))
+            foreach (var c in BuildEditChurnHistory(churnProgram, now, attributable))
             {
                 db.Changes.Add(c);
                 ops.Add(OpRowForChange(c));
