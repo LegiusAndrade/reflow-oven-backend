@@ -1,0 +1,4 @@
+# appsettings.json holds the real secrets locally, but the "secretscrub" git clean filter resets every
+# secret (JWT key, DB connection, SMTP creds, seed-account user/password) to its dev placeholder before
+# anything is committed. Enable it once per clone with: scripts/setup_git_scrub.sh
+src/ReflowOven.Api/appsettings.json filter=secretscrub

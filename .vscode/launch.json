@@ -1,6 +1,12 @@
 {
   // F5 compila (preLaunchTask "build") e sobe a API com o debugger anexado.
   // Coloque breakpoints clicando na margem esquerda de qualquer arquivo .cs.
+  //
+  // ⚠️ O debugger parando em ValidationAppException / NotFoundException / ConflictException é ESPERADO e
+  // benigno: essas AppException são fluxo de validação, capturadas pelo ExceptionMiddleware (viram 400/404/
+  // 409 pro front), nunca crasham. Pra o debugger não te interromper nelas, no painel RUN AND DEBUG >
+  // BREAKPOINTS, DESMARQUE "User-Unhandled Exceptions" ("Exceções Não Tratadas pelo Usuário"). É seguro:
+  // o middleware é a rede de segurança global, então você ainda vê erros de verdade (que viram 500).
   "version": "0.2.0",
   "configurations": [
     {
