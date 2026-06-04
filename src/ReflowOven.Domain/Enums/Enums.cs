@@ -155,7 +155,8 @@ public enum CleanupId
     [JsonStringEnumMemberName("inativos")] Inativos,
     [JsonStringEnumMemberName("programas")] Programas,
     [JsonStringEnumMemberName("usuarios")] Usuarios,
-    [JsonStringEnumMemberName("programas-deletados")] ProgramasDeletados,
+    [JsonStringEnumMemberName("programas_deletados")] ProgramasDeletados,
+    [JsonStringEnumMemberName("usuarios_deletados")] UsuariosDeletados,
 }
 
 /// <summary>The coarse CATEGORY of an operation-log row — the front's sub-tab/filter dimension ("Tudo" = no

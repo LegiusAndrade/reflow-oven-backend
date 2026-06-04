@@ -33,13 +33,15 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         var all = await query.ToListAsync(ct);
         IEnumerable<ReflowProgram> sorted = q.Sort switch
         {
-            ProgramSort.Recent => all.OrderByDescending(p => p.LastUsed ?? DateTimeOffset.MinValue),
+            // Never-run programs fall back to CreatedAt, so a just-created one isn't stuck at the bottom.
+            ProgramSort.Recent => all.OrderByDescending(p => p.LastUsed ?? p.CreatedAt),
             ProgramSort.MostUsed => all.OrderByDescending(p => p.RunCount),
             ProgramSort.Name => all.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
             ProgramSort.Temp => all.OrderByDescending(Peak),
             ProgramSort.Duration => all.OrderByDescending(Total),
+            // Default: user programs first, most-recent (run, else created) first, name as the tiebreak.
             _ => all.OrderBy(p => p.IsSeed)
-                    .ThenByDescending(p => p.LastUsed ?? DateTimeOffset.MinValue)
+                    .ThenByDescending(p => p.LastUsed ?? p.CreatedAt)
                     .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
         };
 
@@ -68,6 +70,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
             Description = description,
             RunCount = 0,
             LastUsed = null,
+            CreatedAt = clock.UtcNow,
             IsSeed = false,
             Segments = segments,
             Profile = profile,
@@ -315,6 +318,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         p.Description,
         p.RunCount,
         p.LastUsed,
+        p.CreatedAt,
         p.Profile.Select(pt => new ProfilePointDto(pt.T, pt.Temp)).ToList(),
         p.Segments?.Select(s => new ProfileSegmentDto(s.Temp, s.DurationSec, s.Ramp)).ToList(),
         favorite);

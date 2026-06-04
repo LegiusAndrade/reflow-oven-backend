@@ -25,6 +25,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         // Active users a cleanup would remove: everyone active except the caller and the hidden Master.
         var selfId = current.UserId;
         var usuarios = await db.Users.CountAsync(u => u.Type != UserType.Master && (selfId == null || u.Id != selfId), ct);
+        var usuariosDel = await db.Users.IgnoreQueryFilters().CountAsync(u => u.IsDeleted, ct);   // soft-deleted (Lixeira)
 
         var sizes = await db.GetTableSizesBytesAsync(ct);
         long TableBytes(string table, int count) => sizes.TryGetValue(table, out var b) ? b : count * BytesPerRecord;
@@ -43,6 +44,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             new(CleanupId.Programas, "Programas salvos", programas, Share(programsTable, programas, totalPrograms)),
             new(CleanupId.Usuarios, "Usuários ativos", usuarios, Share(usersTable, usuarios, totalUsers)),
             new(CleanupId.ProgramasDeletados, "Programas deletados", programasDel, Share(programsTable, programasDel, totalPrograms)),
+            new(CleanupId.UsuariosDeletados, "Usuários deletados", usuariosDel, Share(usersTable, usuariosDel, totalUsers)),
         };
         var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 
@@ -53,15 +55,17 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         return new MaintenanceOverviewDto(db_, metrics.CpuLoadPercent, freeGB, totalGB, RuntimeInformation.OSDescription, metrics.Kernel);
     }
 
-    // programas / usuarios / programas-deletados are destructive admin actions: the dev Master is read-only
-    // here (it sees the sizes in the overview but cannot clear them — front gating is not security).
-    private static readonly CleanupId[] AdminOnlyCategories = [CleanupId.Programas, CleanupId.Usuarios, CleanupId.ProgramasDeletados];
+    // Clearing users (inactive = "deleted", or active) and programs (saved or trashed) is a destructive admin
+    // action: the dev Master is read-only here — it sees the counts/sizes in the overview (to inform the Admin)
+    // but cannot clear them. Device history (execuções/falhas/logs) stays clearable by Admin AND Master.
+    private static readonly CleanupId[] AdminOnlyCategories =
+        [CleanupId.Inativos, CleanupId.Programas, CleanupId.Usuarios, CleanupId.ProgramasDeletados, CleanupId.UsuariosDeletados];
 
     public async Task<CleanupResultDto> CleanupAsync(IReadOnlyList<CleanupId> categories, CancellationToken ct = default)
     {
         var cats = categories.Distinct().ToList();
         if (current.Role == UserType.Master && cats.Any(AdminOnlyCategories.Contains))
-            throw new ForbiddenAppException("Apenas o Admin pode limpar programas salvos, usuários ativos ou programas deletados.");
+            throw new ForbiddenAppException("Apenas o Admin pode limpar usuários (inativos/ativos) ou programas (salvos/deletados).");
 
         var selfId = current.UserId;
         var deleted = 0;
@@ -81,6 +85,8 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                 CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && (selfId == null || u.Id != selfId)).ExecuteDeleteAsync(ct),
                 // Empty the program trash: permanently delete every soft-deleted program.
                 CleanupId.ProgramasDeletados => await db.Programs.IgnoreQueryFilters().Where(p => p.IsDeleted).ExecuteDeleteAsync(ct),
+                // Empty the user trash: permanently delete every soft-deleted user.
+                CleanupId.UsuariosDeletados => await db.Users.IgnoreQueryFilters().Where(u => u.IsDeleted).ExecuteDeleteAsync(ct),
                 _ => 0,
             };
         }

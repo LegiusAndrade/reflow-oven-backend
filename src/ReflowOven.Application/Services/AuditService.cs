@@ -15,6 +15,11 @@ public sealed class AuditService(IAppDbContext db, IClock clock, ICurrentUser cu
         var uid = current.UserId;
         if (uid is null) return; // technician/anonymous: no per-user counter
 
+        // The caller's token can outlive its user row — the account was purged, or a dev re-seed gave users
+        // new ids — so a stale id here would fail the WHOLE mutation with a FK violation. The counter is a
+        // secondary stat: if the user no longer exists, just skip it rather than crash the primary action.
+        if (!await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Id == uid, ct)) return;
+
         var stat = await db.UserActivityStats.FirstOrDefaultAsync(s => s.UserId == uid && s.Label == label, ct);
         if (stat is null)
         {

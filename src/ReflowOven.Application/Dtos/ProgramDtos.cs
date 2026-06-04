@@ -14,6 +14,7 @@ public sealed record ProgramDto(
     string? Description,
     int RunCount,
     DateTimeOffset? LastUsed,
+    DateTimeOffset CreatedAt,
     IReadOnlyList<ProfilePointDto> Profile,
     IReadOnlyList<ProfileSegmentDto>? Segments,
     bool Favorite);

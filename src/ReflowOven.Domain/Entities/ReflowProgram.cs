@@ -21,6 +21,10 @@ public class ReflowProgram
     /// <summary>Null = never run (rendered "Nunca" on the client).</summary>
     public DateTimeOffset? LastUsed { get; set; }
 
+    /// <summary>When the program was created (set on first save; seeds use a fixed install date). Lets a
+    /// just-created program sort to the top even before it has ever been run.</summary>
+    public DateTimeOffset CreatedAt { get; set; }
+
     public bool IsDeleted { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
     /// <summary>Name of whoever deleted it (shown in the Master's trash view); null while live.</summary>

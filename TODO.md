@@ -29,18 +29,17 @@ Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perf
 4. **Verificar "Limpeza mock-stage"** — a nota de 2026-06-01 (abaixo) diz que a Limpeza da Manutenção é mock,
    mas o `MaintenanceService.CleanupAsync` já usa `ExecuteDelete` (deleção real). Confirmar e fechar a nota.
 
-5. **Limpeza: categorias "Programas", "Usuários ativos" e "Programas deletados"** — *pedido do Lucas
+5. **Limpeza: categorias "Programas", "Usuários ativos", "Programas deletados" e "Usuários deletados"** — *pedido do Lucas
    (2026-06-03; reforçado 2026-06-04).* O front já tem as categorias prontas na Limpeza (Diagnóstico →
-   Manutenção); elas aparecem **"vazio"** (desabilitadas) até o backend mandar a contagem. **⚠️ Re-confirmado
-   2026-06-04: o overview ainda retorna só `execucoes/falhas/logs/inativos`** — `programas`, `usuarios` e
-   `programas_deletados` **não vêm**, então o Master não vê o tamanho deles (o Lucas reportou de novo). Faltam:
-   - `GET /api/maintenance/overview` → incluir em `database.categories` os ids **`programas`** (nº de programas
-     salvos + bytes), **`usuarios`** (nº de usuários **ativos, exceto o autenticado** + bytes) e
-     **`programas_deletados`** (nº de programas **soft-deleted / na lixeira** + bytes).
-   - `POST /api/maintenance/cleanup` → tratar **`programas`** (apaga todos os programas salvos — decidir se
-     mantém 1 default, igual ao factory-reset), **`usuarios`** (apaga os usuários **ativos exceto quem
-     chamou**) e **`programas_deletados`** (expurga de vez os programas já soft-deleted, igual ao "purge" da
-     Lixeira #8). A regra "exceto o logado" **tem de ser server-side** (pelo JWT) — o front manda só o id
+   Manutenção); elas aparecem **"vazio"** (desabilitadas) até o backend mandar a contagem. **✅ Atualização
+   2026-06-04 (tarde): o overview já devolve `programas` e `usuarios` com bytes** (confirmado na UI: ex.
+   `135 · 112 KB`; o `usuarios` "exceto o logado" está correto — Admin vê 2, Master vê 3). **Falta só o TRASH**
+   (`programas_deletados` e `usuarios_deletados` — a Lixeira), que ainda vem vazio. Faltam:
+   - `GET /api/maintenance/overview` → **`programas`/`usuarios` já OK**; incluir ainda **`programas_deletados`**
+     e **`usuarios_deletados`** (nº de programas/usuários **soft-deleted / na lixeira** + bytes).
+   - `POST /api/maintenance/cleanup` → **`programas`/`usuarios` já tratados**; falta **`programas_deletados`** e
+     **`usuarios_deletados`** (expurga de vez os programas/usuários já soft-deleted, igual ao "purge" da Lixeira
+     #8). A regra "exceto o logado" do `usuarios` **tem de ser server-side** (pelo JWT) — o front manda só o id
      `usuarios` e nunca decide quem poupar; ele apenas espelha a remoção no cache local.
    - **Permissão (decidido com o Lucas, 2026-06-04):** limpar `programas` e `usuarios` é **só do Admin** — o
      **Master NÃO pode** (exceção deliberada ao "Master ⊇ Admin"; em todo o resto o Master é superusuário).
@@ -49,8 +48,10 @@ Levantadas ao fim da sessão de 2026-06-01. A #1 original (**Comparativo do Perf
      não-selecionável) e nunca envia esses ids quando o autor é Master, mas o `POST /api/maintenance/cleanup`
      **tem de rejeitar** `programas`/`usuarios` vindos de um Master (403/ignorar) — gating de front não é
      segurança. Histórico (`execucoes`/`falhas`/`logs`/`inativos`) segue limpável por Admin **e** Master.
-     **`programas_deletados` (a confirmar):** é a lixeira (a Lixeira #8 é Master-only), então faz sentido ser
-     **Master-allowed**; no front deixei limpável por **ambos** por ora — confirmar se vira Master-only.
+     **Trash `programas_deletados`/`usuarios_deletados` (decidido com o Lucas 2026-06-04): Master-only** — o
+     **Admin nem vê** essas duas categorias na Limpeza (a Lixeira é Master-only); só o Master vê e expurga. O
+     front já as esconde do não-Master; o backend deve **rejeitar** esses ids vindos de Admin/Regular (e,
+     idealmente, o overview nem os devolve fora do Master).
 
 6. **`osKernel` do overview vem como RID, não kernel** — *cosmético, escopo mínimo.*
    `GET /api/maintenance/overview` devolve `osKernel: "ubuntu.24.04-x64"` (um Runtime Identifier do .NET). O

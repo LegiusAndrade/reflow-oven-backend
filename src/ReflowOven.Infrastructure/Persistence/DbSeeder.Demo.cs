@@ -60,7 +60,7 @@ public static partial class DbSeeder
         // --- Bulk demo programs (so the gallery + reports reference ~200 programs) ----------------------
         if (await db.Programs.CountAsync(ct) < DemoProgramCount)
         {
-            foreach (var p in BuildDemoPrograms())
+            foreach (var p in BuildDemoPrograms(now))
                 db.Programs.Add(p);
             await db.SaveChangesAsync(ct);
         }
@@ -133,7 +133,7 @@ public static partial class DbSeeder
                 ops.Add(OpRowForChange(c));
             }
 
-            var churnProgram = await SeedEditChurnProgramAsync(db, ct);
+            var churnProgram = await SeedEditChurnProgramAsync(db, now, ct);
             foreach (var c in BuildEditChurnHistory(churnProgram, now, users))
             {
                 db.Changes.Add(c);
@@ -158,7 +158,9 @@ public static partial class DbSeeder
             foreach (var n in BuildNotifications(now))
                 db.Notifications.Add(n);
 
-        // --- Soft-delete a handful of demo programs + one demo operator so the Lixeira isn't empty -------
+        // --- Soft-delete a handful of demo programs + one user for the Master's trash & cleanup view. The two
+        //     user states stay distinct (per Lucas): operador2 is Inativo — still visible to the Admin but can't
+        //     log in; operador1 is soft-deleted — hidden from the Admin (only the Master's Lixeira) and can't log in.
         var deletedBy = users.FirstOrDefault(u => u.Type == UserType.Master)?.Name ?? admin.Name;
         foreach (var p in programs.Where(p => !p.IsDeleted && p.Id.StartsWith("demo-prog-")).TakeLast(8))
         {
@@ -166,12 +168,12 @@ public static partial class DbSeeder
             p.DeletedAt = now.AddDays(-(Hash(p.Id) % 20 + 1));
             p.DeletedBy = deletedBy;
         }
-        var operador = users.FirstOrDefault(u => u.Name == "operador2" && !u.IsDeleted);
-        if (operador is not null)
+        var deletedUser = users.FirstOrDefault(u => u.Name == "operador1" && !u.IsDeleted);
+        if (deletedUser is not null)
         {
-            operador.IsDeleted = true;
-            operador.DeletedAt = now.AddDays(-3);
-            operador.DeletedBy = deletedBy;
+            deletedUser.IsDeleted = true;
+            deletedUser.DeletedAt = now.AddDays(-3);
+            deletedUser.DeletedBy = deletedBy;
         }
 
         foreach (var b in await db.Boards.ToListAsync(ct))
@@ -188,7 +190,7 @@ public static partial class DbSeeder
 
     /// <summary>A batch of reflow-shaped demo programs (non-seed, so they show in the gallery), varied by a
     /// deterministic hash of the index. IDs are <c>demo-prog-N</c>.</summary>
-    private static IEnumerable<ReflowProgram> BuildDemoPrograms()
+    private static IEnumerable<ReflowProgram> BuildDemoPrograms(DateTimeOffset now)
     {
         string[] types = ["SMD", "BGA", "QFN", "Sem Chumbo", "Cura", "Reballing", "Teste", "Pré-aquec.", "Protótipo", "Linha"];
         for (var i = 0; i < DemoProgramCount; i++)
@@ -202,6 +204,7 @@ public static partial class DbSeeder
                 Description = i % 3 == 0 ? $"Perfil de demonstração ({types[i % types.Length]})." : null,
                 RunCount = Hash($"dr{i}") % 60,
                 LastUsed = null,
+                CreatedAt = now.AddDays(-(Hash($"dc{i}") % 120) - 1), // spread over the last ~4 months
                 IsSeed = false,
                 Profile = DemoProfile(peak, totalSec),
             };
@@ -489,7 +492,7 @@ public static partial class DbSeeder
     }
 
     /// <summary>Idempotently create the one program whose edit history demonstrates the retention cutoff.</summary>
-    private static async Task<ReflowProgram> SeedEditChurnProgramAsync(ReflowDbContext db, CancellationToken ct)
+    private static async Task<ReflowProgram> SeedEditChurnProgramAsync(ReflowDbContext db, DateTimeOffset now, CancellationToken ct)
     {
         var existing = await db.Programs.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == EditChurnProgramId, ct);
         if (existing is not null) return existing;
@@ -501,6 +504,7 @@ public static partial class DbSeeder
             Description = "Editado várias vezes (demo da retenção do histórico de alterações).",
             RunCount = 0,
             LastUsed = null,
+            CreatedAt = now.AddDays(-30), // created at the start of its 30-day edit history
             IsSeed = false,
             Profile =
             [

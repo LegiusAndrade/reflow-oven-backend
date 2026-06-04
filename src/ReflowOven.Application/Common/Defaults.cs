@@ -209,6 +209,9 @@ public static class Defaults
         Name = name,
         RunCount = runCount,
         LastUsed = ParseDate(lastUsed),
+        // Seeds "existed since install": use the last-used date, else a fixed early date — keeps them below
+        // user programs in the default sort.
+        CreatedAt = ParseDate(lastUsed) ?? new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero),
         IsSeed = true,
         // Reflow cooldowns dip toward the baseline; raise any t>0 point to the entry floor (PointTempMin),
         // leaving the fixed t=0 baseline start (0 °C) untouched so seeds honor the same rule as the editor.
