@@ -47,6 +47,10 @@ public static class DependencyInjection
         services.Configure<TechnicianOptions>(config.GetSection(TechnicianOptions.Section));
         services.AddSingleton<ITechnicianCredentials, TechnicianCredentials>();
 
+        // Per-username login lockout (brute-force / BCrypt-DoS guard) — in-process cache, single device.
+        services.AddMemoryCache();
+        services.AddSingleton<ILoginThrottle, LoginThrottle>();
+
         services.Configure<MasterOptions>(config.GetSection(MasterOptions.Section));
         services.AddSingleton<IMasterCredentials, MasterCredentials>();
 

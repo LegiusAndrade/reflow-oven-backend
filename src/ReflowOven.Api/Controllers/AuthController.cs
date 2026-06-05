@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace ReflowOven.Api.Controllers;
 
@@ -7,12 +8,20 @@ namespace ReflowOven.Api.Controllers;
 public sealed class AuthController(AuthService auth, UserService users) : ControllerBase
 {
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [HttpPost("login")]
     public Task<LoginResult> Login([FromBody] LoginRequest req, CancellationToken ct) => auth.LoginAsync(req, ct);
 
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [HttpPost("forgot-password")]
     public Task<OkResponse> ForgotPassword([FromBody] ForgotPasswordRequest req, CancellationToken ct) => auth.ForgotPasswordAsync(req, ct);
+
+    /// <summary>Completes the email recovery: validates the emailed token and sets the new password.</summary>
+    [AllowAnonymous]
+    [EnableRateLimiting("auth")]
+    [HttpPost("reset-password")]
+    public Task<OkResponse> ResetPassword([FromBody] ResetPasswordRequest req, CancellationToken ct) => auth.ResetPasswordAsync(req, ct);
 
     /// <summary>Stateless logout (the client discards the JWT). Recorded on the operation log.</summary>
     [HttpPost("logout")]

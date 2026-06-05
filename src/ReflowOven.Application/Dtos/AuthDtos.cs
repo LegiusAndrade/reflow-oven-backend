@@ -31,5 +31,8 @@ public sealed record LoginResult(bool Ok, string? Error, string? Token, DateTime
 
 public sealed record ForgotPasswordRequest(string Email);
 
+/// <summary>Completes the email recovery flow: the raw token from the email + the chosen new password.</summary>
+public sealed record ResetPasswordRequest(string Token, string NewPassword);
+
 /// <summary>Always reports success to avoid account enumeration.</summary>
 public sealed record OkResponse(bool Ok = true);

@@ -31,8 +31,24 @@ public interface IJwtTokenService
 {
     TokenResult CreateForUser(User user);
 
-    /// <summary>Synthetic full-Admin token for the hidden technician session (no User row).</summary>
+    /// <summary>Scoped token for the hidden technician session (no User row): role <c>Tecnico</c> + the
+    /// <c>calibration</c> claim, so it satisfies ONLY the CalibrationOnly policy — never Admin/Master.</summary>
     TokenResult CreateForCalibration();
+}
+
+/// <summary>Per-username login throttle (in-process): after repeated failures a name is locked for a
+/// cooldown, blunting brute-force and the BCrypt CPU-DoS. Keyed on the typed name (lower-cased), so a
+/// lockout reveals nothing about whether the account exists. Single-device deploy → in-memory is enough.</summary>
+public interface ILoginThrottle
+{
+    /// <summary>True while the name is in its post-failure cooldown.</summary>
+    bool IsLocked(string usernameLower);
+
+    /// <summary>Record one failed attempt; transitions to locked once the threshold is hit.</summary>
+    void RecordFailure(string usernameLower);
+
+    /// <summary>Clear the failure count + any lock (called on a successful authentication).</summary>
+    void Reset(string usernameLower);
 }
 
 /// <summary>Sends transactional emails. Stub (logs) by default; real SMTP via <c>Email:Mode=Smtp</c>.</summary>

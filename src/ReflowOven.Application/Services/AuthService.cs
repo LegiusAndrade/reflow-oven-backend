@@ -10,6 +10,7 @@ public sealed class AuthService(
     IJwtTokenService jwt,
     IClock clock,
     ITechnicianCredentials technician,
+    ILoginThrottle throttle,
     IEmailSender email,
     ICurrentUser current,
     AuditService audit,
@@ -24,19 +25,29 @@ public sealed class AuthService(
             return LoginResult.Fail("Informe o usuário.");
         }
         var password = req.Password ?? "";
+        var lower = username.ToLowerInvariant();
 
-        // Hidden technician session — full Admin, no User row.
+        // Brute-force / DoS guard: once a name has failed too many times it is locked for a cooldown. We
+        // bail BEFORE the costly BCrypt verify (so a lockout also blunts the CPU-DoS angle), with a generic
+        // message and keyed on the typed name — so it reveals nothing about whether the account exists.
+        if (throttle.IsLocked(lower))
+        {
+            logger.LogWarning("Login bloqueado por excesso de tentativas: '{User}'.", username);
+            return LoginResult.Fail("Muitas tentativas de login. Aguarde alguns minutos e tente novamente.");
+        }
+
+        // Hidden technician session — Calibração-scoped (role Tecnico), no User row.
         if (string.Equals(username, technician.Username, StringComparison.OrdinalIgnoreCase) && technician.Verify(password))
         {
+            throttle.Reset(lower);
             logger.LogInformation("Login OK: técnico '{User}' (Calibração).", username);
             audit.Record(OperationType.Login, OperationObject.Sessao, "calibracao", [OperationField.Of("papel", "Técnico (Calibração)")], operatorName: "Técnico");
             await db.SaveChangesAsync(ct);
             var t = jwt.CreateForCalibration();
-            var session = new SessionDto("calibration", "Calibração", UserType.Admin, t.IssuedAtUnixMs, true);
+            var session = new SessionDto("calibration", "Calibração", UserType.Tecnico, t.IssuedAtUnixMs, true);
             return LoginResult.Success(t.Token, t.ExpiresAt, session);
         }
 
-        var lower = username.ToLowerInvariant();
         var user = await db.Users.FirstOrDefaultAsync(u => u.Name.ToLower() == lower, ct);
 
         // SECURITY: never disclose which of the username/password was wrong. A distinct "user not found"
@@ -49,11 +60,15 @@ public sealed class AuthService(
 
         if (user is null || !passwordOk)
         {
+            throttle.RecordFailure(lower);
             logger.LogWarning("Login falhou: credenciais inválidas para '{User}'.", username);
             audit.Record(OperationType.Login, OperationObject.Sessao, username, [OperationField.Of("resultado", "falha")], operatorName: username);
             await db.SaveChangesAsync(ct);
             return LoginResult.Fail("Usuário ou senha incorretos.");
         }
+
+        // Password is correct from here on — clear any accumulated failures/lock for this name.
+        throttle.Reset(lower);
 
         // Reachable only once the password is correct, so surfacing an inactive account leaks no existence
         // to an attacker (they'd already need valid credentials) while still telling a real user why.
@@ -170,6 +185,54 @@ public sealed class AuthService(
             await db.SaveChangesAsync(ct);
             await email.SendPasswordResetAsync(user.Email, raw, ct);
         }
+        return new OkResponse();
+    }
+
+    /// <summary>Completes the recovery flow from the emailed token. Enumeration-safe: an invalid/expired
+    /// token yields the same generic error. Single-use — the token (and any other outstanding ones for the
+    /// user) is consumed, and expired/used tokens are swept so they never accumulate.</summary>
+    public async Task<OkResponse> ResetPasswordAsync(ResetPasswordRequest req, CancellationToken ct = default)
+    {
+        Validation.ValidatePassword(req.NewPassword ?? "");
+        var raw = (req.Token ?? "").Trim();
+        var now = clock.UtcNow;
+
+        // Opportunistic GC so expired/used tokens don't pile up (previously they were only ever cleared by a
+        // factory reset).
+        await db.PasswordResetTokens.Where(t => t.ExpiresAt < now || t.UsedAt != null).ExecuteDeleteAsync(ct);
+        if (raw.Length == 0)
+            throw new ValidationAppException("Token de recuperação inválido ou expirado.");
+
+        // TokenHash is a salted BCrypt hash, so we can't look it up directly — verify the raw token against
+        // the (few) live tokens. AsNoTracking: they're only read to compare, never mutated.
+        var live = await db.PasswordResetTokens.AsNoTracking().Where(t => t.UsedAt == null && t.ExpiresAt >= now).ToListAsync(ct);
+        var match = live.FirstOrDefault(t => hasher.Verify(raw, t.TokenHash));
+        if (match is null)
+        {
+            logger.LogWarning("Recuperação de senha: token inválido ou expirado.");
+            throw new ValidationAppException("Token de recuperação inválido ou expirado.");
+        }
+
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == match.UserId, ct);
+        if (user is null || user.IsDeleted)
+        {
+            await db.PasswordResetTokens.Where(t => t.UserId == match.UserId).ExecuteDeleteAsync(ct);
+            throw new ValidationAppException("Token de recuperação inválido ou expirado.");
+        }
+
+        user.PasswordHash = hasher.Hash(req.NewPassword!);
+        user.MustChangePassword = false;
+        user.PasswordChangedAt = now;
+        user.PasswordIssuedAt = null;
+        user.LastPasswordReminderAt = null;
+        // Single-use: consume this token and invalidate every other outstanding token for the user.
+        await db.PasswordResetTokens.Where(t => t.UserId == user.Id).ExecuteDeleteAsync(ct);
+        throttle.Reset(user.Name.ToLowerInvariant());
+        audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name,
+            [OperationField.Of("senha", "redefinida por recuperação")], operatorId: user.Id, operatorName: user.Name);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Senha redefinida por recuperação para '{User}'.", user.Name);
         return new OkResponse();
     }
 }

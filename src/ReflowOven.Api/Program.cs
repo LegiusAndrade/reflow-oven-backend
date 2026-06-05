@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
@@ -125,6 +127,25 @@ var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?
 builder.Services.AddCors(o => o.AddPolicy(corsPolicy, p =>
     p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
+// --- Rate limiting: brute-force / DoS guard on the anonymous auth endpoints (login/forgot/reset) ------
+// Fixed window per client IP. NOTE: behind the Next.js BFF the backend sees the BFF's IP, so this is a
+// coarse global backstop; the precise per-account control is AuthService's ILoginThrottle lockout. Forward
+// the real client IP (X-Forwarded-For + UseForwardedHeaders) to make this true per-client.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", http => RateLimitPartition.GetFixedWindowLimiter(
+        http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    // Answer in the frontend's {ok,error} shape so the login screen shows a clean message, not a raw 429.
+    options.OnRejected = async (ctx, token) =>
+    {
+        ctx.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+        await ctx.HttpContext.Response.WriteAsync(
+            "{\"ok\":false,\"error\":\"Muitas tentativas. Aguarde um momento e tente novamente.\"}", token);
+    };
+});
+
 builder.Services.AddHealthChecks();
 
 // --- HTTP request/response logging (with redaction) — wired here, enabled in Development only --------
@@ -201,8 +222,10 @@ app.UseMiddleware<ExceptionMiddleware>();
 app.UseSerilogRequestLogging(options =>
 {
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath}{RequestQueryString} responded {StatusCode} in {Elapsed:0.0000} ms";
+    // Redact the SignalR ?access_token=<JWT> before it reaches the logs (the hubs authenticate via the
+    // query string, and this request-logging line runs in production too).
     options.EnrichDiagnosticContext = (diag, ctx) =>
-        diag.Set("RequestQueryString", ctx.Request.QueryString.HasValue ? ctx.Request.QueryString.Value : "");
+        diag.Set("RequestQueryString", LogRedaction.Query(ctx.Request.QueryString.Value));
     options.GetLevel = (ctx, _, ex) =>
         ex is OperationCanceledException && ctx.RequestAborted.IsCancellationRequested ? LogEventLevel.Verbose
         : ex is not null || ctx.Response.StatusCode >= 500 ? LogEventLevel.Error
@@ -229,6 +252,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors(corsPolicy);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -249,4 +273,15 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+/// <summary>Log hygiene helpers for the request-logging pipeline.</summary>
+static class LogRedaction
+{
+    private static readonly System.Text.RegularExpressions.Regex AccessToken =
+        new("(?i)(access_token=)[^&]*", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Masks the value of any <c>access_token</c> query parameter (the SignalR JWT) for logging.</summary>
+    public static string Query(string? queryString) =>
+        string.IsNullOrEmpty(queryString) ? "" : AccessToken.Replace(queryString, "access_token=***");
 }
