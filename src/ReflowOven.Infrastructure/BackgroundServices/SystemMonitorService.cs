@@ -128,8 +128,10 @@ public sealed class SystemMonitorService(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        // Delimited match so a "1.2" version isn't considered already-announced by a "1.20" message.
+        var needle = $"versão {version} ";
         return await db.Notifications.AnyAsync(
-            n => n.Kind == NotificationFeedKind.Update && n.Message.Contains(version), ct);
+            n => n.Kind == NotificationFeedKind.Update && n.Message.Contains(needle), ct);
     }
 
     private async Task RaiseAsync(NotificationFeedKind kind, string title, string message, CancellationToken ct)

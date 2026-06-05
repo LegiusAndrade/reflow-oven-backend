@@ -13,11 +13,11 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(e => e.ProgramName.ToLower().Contains(s) || (e.UserName != null && e.UserName.ToLower().Contains(s)));
         }
         if (q.From is not null) query = query.Where(e => e.StartedAt >= q.From);
-        if (ToExclusive(q) is { } toExc) query = query.Where(e => e.StartedAt < toExc);
+        if (q.ToExclusive() is { } toExc) query = query.Where(e => e.StartedAt < toExc);
         if (EnumWire.TryFromWire<ExecutionStatus>(q.Status, out var status)) query = query.Where(e => e.Status == status);
 
         var total = await query.CountAsync(ct);
-        var (page, size) = Paging(q);
+        var (page, size) = q.Paging();
         var items = await query
             .OrderByDescending(e => e.StartedAt)
             .Skip((page - 1) * size).Take(size)
@@ -50,11 +50,11 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(e => e.Message.ToLower().Contains(s) || e.FaultTypeCode.ToLower().Contains(s));
         }
         if (q.From is not null) query = query.Where(e => e.At >= q.From);
-        if (ToExclusive(q) is { } toExc) query = query.Where(e => e.At < toExc);
+        if (q.ToExclusive() is { } toExc) query = query.Where(e => e.At < toExc);
         if (EnumWire.TryFromWire<ErrorSeverity>(q.Severity, out var severity)) query = query.Where(e => e.Severity == severity);
 
         var total = await query.CountAsync(ct);
-        var (page, size) = Paging(q);
+        var (page, size) = q.Paging();
         var items = await query
             .OrderByDescending(e => e.At)
             .Skip((page - 1) * size).Take(size)
@@ -84,13 +84,13 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(c => c.Target.ToLower().Contains(s) || (c.UserName != null && c.UserName.ToLower().Contains(s)));
         }
         if (q.From is not null) query = query.Where(c => c.At >= q.From);
-        if (ToExclusive(q) is { } toExc) query = query.Where(c => c.At < toExc);
+        if (q.ToExclusive() is { } toExc) query = query.Where(c => c.At < toExc);
         if (q.Before is not null) query = query.Where(c => c.At < q.Before);
         if (EnumWire.TryFromWire<ChangeAction>(q.Action, out var action)) query = query.Where(c => c.Action == action);
         if (!string.IsNullOrWhiteSpace(q.ProgramId)) query = query.Where(c => c.ProgramId == q.ProgramId);
 
         var total = await query.CountAsync(ct);
-        var (page, size) = Paging(q);
+        var (page, size) = q.Paging();
         var items = await query
             .OrderByDescending(c => c.At)
             .Skip((page - 1) * size).Take(size)
@@ -211,11 +211,11 @@ public sealed class ReportService(IAppDbContext db)
             query = query.Where(l => l.Message.ToLower().Contains(s));
         }
         if (q.From is not null) query = query.Where(l => l.At >= q.From);
-        if (ToExclusive(q) is { } toExc) query = query.Where(l => l.At < toExc);
+        if (q.ToExclusive() is { } toExc) query = query.Where(l => l.At < toExc);
         if (EnumWire.TryFromWire<LogLevel>(q.Level, out var level)) query = query.Where(l => l.Level == level);
 
         var total = await query.CountAsync(ct);
-        var (page, size) = Paging(q);
+        var (page, size) = q.Paging();
         var items = await query
             .OrderByDescending(l => l.Id)
             .Skip((page - 1) * size).Take(size)
@@ -223,16 +223,6 @@ public sealed class ReportService(IAppDbContext db)
             .ToListAsync(ct);
         return new PagedResult<SystemLogDto>(items, total, page, size);
     }
-
-    // The page size is clamped server-side so a client can never pull an unbounded result set
-    // (e.g. "give me 1000 rows") and overload the service — at most ReportPageSizeMax rows.
-    private static (int page, int size) Paging(ReportQuery q) =>
-        (Math.Max(1, q.Page), Math.Clamp(q.PageSize, 1, DomainConstants.ReportPageSizeMax));
-
-    // Treat the inclusive 'To' date as the end of that day: filter strictly below the next midnight,
-    // so a yyyy-mm-dd value (which parses to 00:00) still includes rows from that whole day.
-    private static DateTimeOffset? ToExclusive(ReportQuery q) =>
-        q.To is { } to ? new DateTimeOffset(to.Date.AddDays(1), to.Offset) : null;
 
     private static LogEventDto MapEvent(LogEvent v) => new(v.At, v.Kind, v.Message);
 

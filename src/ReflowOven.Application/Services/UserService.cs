@@ -31,8 +31,9 @@ public sealed class UserService(
         var email = (req.Email ?? "").Trim();
         Validation.ValidateEmail(email);
 
-        // The dev Master is seeded, not creatable via the API — block self-promotion via "type":"Master".
-        if (req.Type == UserType.Master)
+        // Only Admin/Regular are creatable here: the dev Master is seeded (no self-promotion via
+        // "type":"Master") and Tecnico is the synthetic technician session, never a real account.
+        if (req.Type is not (UserType.Admin or UserType.Regular))
             throw new ValidationAppException("Tipo de usuário inválido.");
 
         var lower = name.ToLowerInvariant();
@@ -86,6 +87,9 @@ public sealed class UserService(
         // The dev Master is immutable through this screen, and no one may be promoted to Master here.
         if (user.Type == UserType.Master || req.Type == UserType.Master)
             throw new ForbiddenAppException("O usuário Master não pode ser alterado por esta tela.");
+        // Only Admin/Regular are valid here (Tecnico is the synthetic technician session, not an account).
+        if (req.Type is not (UserType.Admin or UserType.Regular))
+            throw new ValidationAppException("Tipo de usuário inválido.");
 
         var email = (req.Email ?? "").Trim();
         Validation.ValidateEmail(email);
@@ -232,15 +236,6 @@ public sealed class UserService(
         return !await db.Users.AnyAsync(u => u.Id != userId && u.Type == UserType.Admin && u.Status == UserStatus.Ativo, ct);
     }
 
-    // Per-item delete authority for the current caller: the Admin manages every user; the dev Master may only
-    // remove users IT created (others don't even show a delete control); nobody else deletes here.
-    private bool CanDelete(Guid? createdById) => current.Role switch
-    {
-        UserType.Admin => true,
-        UserType.Master => createdById is not null && createdById == current.UserId,
-        _ => false,
-    };
-
     private UserDto Map(User u) => new(
         u.Id.ToString(),
         u.Name,
@@ -249,6 +244,8 @@ public sealed class UserService(
         u.Status,
         u.CreatedAt,
         u.LastLogin,
-        u.ActivityStats.OrderBy(s => s.Id).Select(s => new UserEventDto(s.Label, s.Count)).ToList(),
-        CanDelete(u.CreatedById));
+        // Canonical label order (Defaults.ActivityLabels), not insertion order, so the rows read the same
+        // across users in the detail modal.
+        u.ActivityStats.OrderBy(s => Array.IndexOf(Defaults.ActivityLabels, s.Label)).Select(s => new UserEventDto(s.Label, s.Count)).ToList(),
+        current.CanDeleteOwnedBy(u.CreatedById));
 }

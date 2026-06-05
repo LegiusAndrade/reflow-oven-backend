@@ -54,7 +54,7 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         }
         var db_ = new DatabaseSizeDto(await db.GetDatabaseSizeBytesAsync(ct), categories);
 
-        var (freeGB, totalGB) = DiskSpace();
+        var (freeGB, totalGB) = DiskInfo.SpaceGB();
         var metrics = await system.GetMetricsAsync(ct);
         // Real kernel version (uname -r style, e.g. "6.8.0-31-generic") rather than the .NET RuntimeIdentifier —
         // the front shows this under "Versão do Linux".
@@ -169,17 +169,4 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         await db.SaveChangesAsync(ct);
     }
 
-    private static (double freeGB, double totalGB) DiskSpace()
-    {
-        try
-        {
-            var root = Path.GetPathRoot(AppContext.BaseDirectory);
-            var drive = new DriveInfo(string.IsNullOrEmpty(root) ? "/" : root);
-            return (Math.Round(drive.AvailableFreeSpace / 1e9, 1), Math.Round(drive.TotalSize / 1e9, 1));
-        }
-        catch
-        {
-            return (0, 0);
-        }
-    }
 }
