@@ -138,11 +138,14 @@ builder.Services.AddRateLimiter(options =>
         http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
     // Answer in the frontend's {ok,error} shape so the login screen shows a clean message, not a raw 429.
+    // Include the window's retry-after both as the standard HTTP header and in the body (for the UI countdown).
     options.OnRejected = async (ctx, token) =>
     {
+        var secs = ctx.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? (int)Math.Ceiling(retryAfter.TotalSeconds) : 0;
+        if (secs > 0) ctx.HttpContext.Response.Headers.RetryAfter = secs.ToString();
         ctx.HttpContext.Response.ContentType = "application/json; charset=utf-8";
         await ctx.HttpContext.Response.WriteAsync(
-            "{\"ok\":false,\"error\":\"Muitas tentativas. Aguarde um momento e tente novamente.\"}", token);
+            $"{{\"ok\":false,\"error\":\"Muitas tentativas. Aguarde um momento e tente novamente.\",\"retryAfterSeconds\":{secs}}}", token);
     };
 });
 

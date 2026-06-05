@@ -30,10 +30,10 @@ public sealed class AuthService(
         // Brute-force / DoS guard: once a name has failed too many times it is locked for a cooldown. We
         // bail BEFORE the costly BCrypt verify (so a lockout also blunts the CPU-DoS angle), with a generic
         // message and keyed on the typed name — so it reveals nothing about whether the account exists.
-        if (throttle.IsLocked(lower))
+        if (throttle.LockRemaining(lower) is { } wait)
         {
             logger.LogWarning("Login bloqueado por excesso de tentativas: '{User}'.", username);
-            return LoginResult.Fail("Muitas tentativas de login. Aguarde alguns minutos e tente novamente.");
+            return LoginResult.Fail($"Muitas tentativas de login. Tente novamente em {FormatWait(wait)}.", (int)Math.Ceiling(wait.TotalSeconds));
         }
 
         // Hidden technician session — Calibração-scoped (role Tecnico), no User row.
@@ -234,5 +234,13 @@ public sealed class AuthService(
 
         logger.LogInformation("Senha redefinida por recuperação para '{User}'.", user.Name);
         return new OkResponse();
+    }
+
+    /// <summary>Human-readable remaining wait for the lockout message; the precise value goes in
+    /// <c>LoginResult.RetryAfterSeconds</c> for a live countdown on the client.</summary>
+    private static string FormatWait(TimeSpan t)
+    {
+        var secs = Math.Max(1, (int)Math.Ceiling(t.TotalSeconds));
+        return secs >= 60 ? $"{(secs + 59) / 60} min" : $"{secs} s";
     }
 }

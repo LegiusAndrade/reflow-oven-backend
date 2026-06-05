@@ -41,8 +41,8 @@ public interface IJwtTokenService
 /// lockout reveals nothing about whether the account exists. Single-device deploy → in-memory is enough.</summary>
 public interface ILoginThrottle
 {
-    /// <summary>True while the name is in its post-failure cooldown.</summary>
-    bool IsLocked(string usernameLower);
+    /// <summary>Remaining lockout cooldown for the name, or null if it is not currently locked.</summary>
+    TimeSpan? LockRemaining(string usernameLower);
 
     /// <summary>Record one failed attempt; transitions to locked once the threshold is hit.</summary>
     void RecordFailure(string usernameLower);

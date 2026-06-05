@@ -21,10 +21,12 @@ public sealed record SessionDto(
 /// <summary>Authenticated self-service password change.</summary>
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
-/// <summary>Login outcome mirroring the frontend's {ok,error} contract (HTTP 200 on either branch).</summary>
-public sealed record LoginResult(bool Ok, string? Error, string? Token, DateTimeOffset? ExpiresAt, SessionDto? Session)
+/// <summary>Login outcome mirroring the frontend's {ok,error} contract (HTTP 200 on either branch).
+/// <c>RetryAfterSeconds</c> is set only when the attempt was throttled (lockout), so the UI can show a
+/// countdown; it is omitted otherwise.</summary>
+public sealed record LoginResult(bool Ok, string? Error, string? Token, DateTimeOffset? ExpiresAt, SessionDto? Session, int? RetryAfterSeconds = null)
 {
-    public static LoginResult Fail(string error) => new(false, error, null, null, null);
+    public static LoginResult Fail(string error, int? retryAfterSeconds = null) => new(false, error, null, null, null, retryAfterSeconds);
     public static LoginResult Success(string token, DateTimeOffset expiresAt, SessionDto session) =>
         new(true, null, token, expiresAt, session);
 }
