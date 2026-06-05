@@ -13,6 +13,7 @@ public enum UserType
     Admin,
     Regular,
     Master, // dev superuser: inherits Admin + unlocks the Diagnóstico → Log tab (no JsonStringEnumMemberName → wire literal "Master")
+    Tecnico, // hidden calibration technician session (no User row): satisfies ONLY CalibrationOnly, never the Admin/Master policies. Wire literal "Tecnico".
 }
 
 public enum UserStatus

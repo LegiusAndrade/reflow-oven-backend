@@ -19,7 +19,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options, IClock clock) 
         Create(user.Id.ToString(), user.Name, user.Type.ToString(), calibration: false, mustChangePassword: user.MustChangePassword);
 
     public TokenResult CreateForCalibration() =>
-        Create("calibration", "Calibração", nameof(UserType.Admin), calibration: true, mustChangePassword: false);
+        Create("calibration", "Calibração", nameof(UserType.Tecnico), calibration: true, mustChangePassword: false);
 
     private TokenResult Create(string subject, string name, string role, bool calibration, bool mustChangePassword)
     {
