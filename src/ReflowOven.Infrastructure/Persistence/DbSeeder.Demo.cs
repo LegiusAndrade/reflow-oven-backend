@@ -62,7 +62,11 @@ public static partial class DbSeeder
         var attributable = users.Where(u => u.Type != UserType.Master).ToList();
 
         // --- Bulk demo programs (so the gallery + reports reference ~200 programs) ----------------------
-        if (await db.Programs.CountAsync(ct) < DemoProgramCount)
+        // Idempotent on the FIXED demo ids — NOT a count threshold: a deletion/purge can drop the live count
+        // below DemoProgramCount while the rows still exist, and re-adding them then violates PK_Programs.
+        // Because the insert is one transaction, that turns a restart into a startup crash (the ":5248 cai e
+        // volta" loop). IgnoreQueryFilters so a soft-deleted demo row still counts as "already seeded".
+        if (!await db.Programs.IgnoreQueryFilters().AnyAsync(p => p.Id.StartsWith("demo-prog-"), ct))
         {
             foreach (var p in BuildDemoPrograms(now))
                 db.Programs.Add(p);
