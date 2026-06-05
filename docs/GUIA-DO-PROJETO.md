@@ -15,6 +15,7 @@ no projeto, por que existe, e como **rodar/debugar no VSCode**. Leitura recomend
 8. [Comandos do dia a dia](#8-comandos-do-dia-a-dia)
 9. [Glossário](#9-glossário)
 10. [Solução de problemas (os perrengues que passamos)](#10-solução-de-problemas)
+11. [Papéis e permissões — quem pode o quê](#11-papéis-e-permissões)
 
 ---
 
@@ -124,7 +125,7 @@ services:
 
 | Arquivo | O que faz / por quê |
 | --- | --- |
-| `Entities/User.cs` | Usuário (login, papel Admin/Regular, status), contadores de atividade e token de reset de senha. |
+| `Entities/User.cs` | Usuário (login, papel **Admin/Regular/Master**, status), contadores de atividade, **quem o criou** (`CreatedById`) e token de reset de senha. Quem-pode-o-quê na [seção 11](#11-papéis-e-permissões). |
 | `Entities/ReflowProgram.cs` | O **perfil térmico** (programa): pontos temperatura×tempo, segmentos, favorito, soft-delete. Chama-se `ReflowProgram` para não colidir com a classe `Program` do .NET. |
 | `Entities/ExecutionReport.cs` | O registro de uma execução concluída (curva programada × real, eventos, pico de temp/corrente). |
 | `Entities/ErrorLogEntry.cs` | Uma falha registrada + o catálogo de tipos de falha (`FaultType`) + o "snapshot" multi-sinal. |
@@ -205,7 +206,7 @@ services:
 | `Realtime/DiagnosticsHub.cs` | Hub `/hubs/diagnostics`: leituras de sensor a 1 Hz na tela de Diagnóstico. |
 | `Realtime/SignalRTelemetrySink.cs` | Implementa `ITelemetrySink` enviando os dados pelos hubs. |
 | `Auth/CurrentUser.cs` | Lê quem está logado a partir dos claims do JWT. |
-| `Auth/AuthPolicies.cs` | Nomes das políticas (`AdminOnly`, `CalibrationOnly`). |
+| `Auth/AuthPolicies.cs` | Nomes das políticas de autorização: `AdminOnly` (Admin+Master), `OperatorOrAdmin` (operador/Admin/Master), `MasterOnly` (só o dev Master) e `CalibrationOnly` (só o técnico). Detalhe na [seção 11](#11-papéis-e-permissões). |
 | `Middleware/ExceptionMiddleware.cs` | Captura erros e responde em formato padrão (ProblemDetails) com o status certo. |
 | `GlobalUsings.cs` | `using` globais da API. |
 
@@ -479,6 +480,97 @@ accepted`. Solução: ative o 2FA na conta Google, gere a Senha de app e use-a e
 (o `Email__Smtp__User`/`From` é o endereço completo). Passo a passo na [seção 7](#7-configurar-o-e-mail-smtp).
 O envio é *best-effort* — uma falha de e-mail **nunca derruba a operação** (o usuário é criado mesmo assim),
 só fica registrada no log.
+
+---
+
+## 11. Papéis e permissões
+
+Quem pode o quê. O backend é **autenticado por padrão** — tudo exige login, menos `login`,
+`forgot-password`, `health` e o `/scalar`. Cada escrita é guardada por uma **policy** declarada em
+`Auth/AuthPolicies.cs` e ligada em `Program.cs`.
+
+### Os papéis
+
+| Papel | Quem é | De onde vem |
+| --- | --- | --- |
+| **Regular** | O **operador** do dia a dia (roda perfis na tela Início). | Usuário do banco, tipo `Regular`. |
+| **Admin** | O **administrador do cliente**: gere usuários, programas, configurações e o sistema. | Usuário do banco, tipo `Admin`. |
+| **Master (dev)** | **Superusuário de desenvolvimento, oculto** do Admin/Regular. Herda o Admin + a Lixeira + o Log de Operação, com exceções deliberadas (abaixo). | Semeado da config (`Master:*`), tipo `Master`. |
+| **Técnico** | Sessão oculta só para **calibrar a placa**. | Login fixo `calibracao` (config) — **não é** linha em `Users`. |
+
+### As policies
+
+| Policy | Quem satisfaz | Guarda |
+| --- | --- | --- |
+| *(fallback)* | qualquer logado | tudo, por padrão |
+| `OperatorOrAdmin` | Regular + Admin + Master | **iniciar/parar** uma queima |
+| `AdminOnly` | Admin + Master | as **escritas** (usuários, programas, configurações, sistema, manutenção) |
+| `MasterOnly` | **só** o Master | a **Lixeira** (ver/restaurar/expurgar deletados) e o **Log de Operação** |
+| `CalibrationOnly` | **só** o Técnico (claim `calibration`) | os endpoints de **Calibração** |
+
+### Quem pode o quê (Regular / Admin / dev Master)
+
+| Ação | Regular | Admin | Master |
+| --- | :---: | :---: | :---: |
+| Logar; ver galeria, relatórios, estatísticas, notificações; **ler** Configurações e Sistema | ✅ | ✅ | ✅ |
+| **Iniciar / parar uma queima** | ✅ | ✅ | ✅ |
+| Favoritar programa | ✅ | ✅ | ✅ |
+| **Criar / editar programa** | ❌ | ✅ | ✅ |
+| **Apagar programa** | ❌ | ✅ qualquer | ✅ **só os que criou** |
+| **CRUD de usuários** | ❌ | ✅ | ✅ |
+| **Apagar usuário** | ❌ | ✅ qualquer¹ | ✅ **só os que criou** |
+| **Gravar Configurações** (PID/forno/processo/rede) | ❌ | ✅ | ✅ |
+| **Sistema** — Wi-Fi/relógio/NTP/OTA/reboot/shutdown | ❌ | ✅ | ✅ |
+| **Diagnóstico** — autoteste / ping | ❌ | ✅ | ✅ |
+| **Manutenção** — limpar histórico (execuções/falhas/logs) | ❌ | ✅ | ✅ |
+| **Manutenção** — limpar dados vivos (usuários/programas salvos) | ❌ | ✅ | ❌ (só vê o tamanho) |
+| **Lixeira** — ver/restaurar/expurgar/limpar deletados (programas e usuários) | ❌ | ❌ (nem vê) | ✅ |
+| **Reset de fábrica** | ❌ | ✅ | ✅ |
+| **Log de Operação** (`/api/operation-log`) | ❌ | ❌ | ✅ |
+| **Calibração** da placa | ❌ | ❌ | ❌ → só o **Técnico** |
+
+¹ exceto a **própria conta** e o **último admin ativo** (ver regras transversais).
+
+### O dev **Master** em detalhe (as exceções ao "Master ⊇ Admin")
+
+Superusuário de **desenvolvimento** — não mexe nos dados do cliente que não criou e **não pode vazar** para
+o Admin/Regular:
+
+- **Invisível:** nunca é contado/listado/ranqueado em nada que o Admin/Regular lê (tela de Usuários,
+  Estatísticas `activeUsers`/`topUsers`, `/api/system/audit`). Suas mudanças **não** entram nas *Alterações*
+  (nem nos contadores) — só no **Log de Operação** (Master-only).
+- **Apaga só o que criou:** programa/usuário só é deletável pelo Master se o `CreatedById` for dele (o DTO
+  traz `canDelete` por viewer; o front esconde o botão e o serviço rejeita com 403).
+- **Limpeza:** **não** limpa em massa os dados vivos do cliente (usuários/programas salvos) — só **vê o
+  tamanho** para informar o Admin. Em troca, a **Lixeira** (deletados) é **só dele** — o Admin nem vê.
+- **Permanente:** o Master não pode ser alterado nem removido pela tela de Usuários.
+
+### O Técnico (calibração) — caso à parte
+
+Login fixo `calibracao` (config), **sem linha em `Users`**. É a única sessão que abre a **Calibração** (claim
+`calibration`). O token é mintado com um papel **próprio `Tecnico`** (não `Admin`), então ele satisfaz
+**apenas** `CalibrationOnly` — **não** alcança `AdminOnly`/`OperatorOrAdmin`/`MasterOnly`, e a API responde
+**403** nesses. Como não há usuário no banco, ações por-usuário (preferências/tema) também são bloqueadas.
+*(Contrato com o front: a sessão volta com `role: "Tecnico"`; o TODO do front pede somar esse valor ao tipo
+`Role`/zod — sem isso o zod só loga um aviso, não quebra.)*
+
+### Regras transversais de segurança
+
+- **Autenticado por padrão**; só `login`/`forgot-password`/`health`/`scalar` são abertos.
+- **Ninguém apaga a própria conta** (403) e o **último admin ativo** não pode ser removido nem rebaixado.
+- **Cadastro MODELO B:** o admin **não define nem vê** a senha — o sistema **gera** e **envia por e-mail**; o
+  usuário troca em até 7 dias (depois o login pede uma nova). Em dev (`Email:Mode=Stub`) a senha sai no console.
+- **Restaurar** um usuário da Lixeira o traz de volta **Inativo** (nunca reativa sozinho).
+- **Login anti-enumeração:** "Usuário ou senha incorretos" é a **mesma** mensagem (e mesmo tempo) para usuário
+  inexistente e senha errada — não revela quais usuários existem.
+- **Força bruta / DoS:** `login`/`forgot-password`/`reset-password` têm **rate-limit por IP** (`UseRateLimiter`,
+  janela fixa) e a conta entra em **lockout temporário** após 5 falhas (pula o BCrypt enquanto travada).
+- **Recuperação de senha:** `forgot-password` gera um token (hash, 1 h) e **`reset-password`** o consome
+  (single-use, com GC dos expirados) — sem revelar se o e-mail existe.
+- **Logs sem segredo:** o `access_token` do SignalR é **redigido** na linha de request do Serilog; a senha do
+  Técnico é comparada em **tempo constante** (`FixedTimeEquals`).
+- **Nenhum DTO de saída** carrega senha/hash; o **JWT** é assinado com chave de config/ambiente (nunca
+  hardcoded); todo apagar do cliente é **soft-delete** (vai para a Lixeira do Master).
 
 ---
 
