@@ -17,7 +17,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - reflowoven-pgdata:/var/lib/postgresql/data
+      # postgres:18+ keeps data in a major-version subdir, so the volume mounts at the PARENT
+      # /var/lib/postgresql (NOT /var/lib/postgresql/data, the pre-18 path). With the old path the 18 image
+      # refuses to start ("data in unused mount/volume") and anything written lands in the ephemeral
+      # container layer (lost on recreate) instead of the volume.
+      - reflowoven-pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U reflow -d reflowoven"]
       interval: 5s
