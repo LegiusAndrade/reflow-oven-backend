@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+# Cancel a previous run on the same ref when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test (.NET 10)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Honor the SDK pinned in global.json (10.0.x, rollForward latestFeature).
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ReflowOven.slnx
+
+      - name: Build
+        run: dotnet build ReflowOven.slnx --configuration Release --no-restore
+
+      # Unit tests use the EF Core InMemory provider, so no PostgreSQL service is needed.
+      - name: Test
+        run: dotnet test ReflowOven.slnx --configuration Release --no-build --verbosity normal
