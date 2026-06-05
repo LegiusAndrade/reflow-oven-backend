@@ -83,6 +83,8 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             throw new ForbiddenAppException("Apenas o Master pode esvaziar a lixeira (programas/usuários deletados).");
 
         var selfId = current.UserId;
+        var now = clock.UtcNow;
+        var actor = current.Name;
         var deleted = 0;
         foreach (var cat in cats)
         {
@@ -93,13 +95,29 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                 CleanupId.Alteracoes => throw new ValidationAppException("O log de Alterações (auditoria) é protegido e não pode ser apagado."),
                 CleanupId.Falhas => await db.Errors.ExecuteDeleteAsync(ct),
                 CleanupId.Logs => await db.SystemLog.ExecuteDeleteAsync(ct),
-                CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo).ExecuteDeleteAsync(ct),
-                // Saved (active, user-created) programs — the factory seed catalog is kept; favorites cascade.
-                CleanupId.Programas => await db.Programs.Where(p => !p.IsSeed).ExecuteDeleteAsync(ct),
+                // Users/programs are SOFT-deleted: the Admin never destroys data, it sends it to the Master's
+                // Lixeira (who alone restores or permanently purges it). Only the trash categories below — and a
+                // factory reset — actually delete rows. Stamped with who/when so the trash shows "deleted by".
+                CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(u => u.IsDeleted, true)
+                        .SetProperty(u => u.DeletedAt, now)
+                        .SetProperty(u => u.DeletedBy, actor), ct),
+                // Saved (active, user-created) programs — the factory seed catalog is kept; favorites stay until
+                // the Master purges the trash (soft-delete, not a cascading hard delete).
+                CleanupId.Programas => await db.Programs.Where(p => !p.IsSeed)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(p => p.IsDeleted, true)
+                        .SetProperty(p => p.DeletedAt, now)
+                        .SetProperty(p => p.DeletedBy, actor), ct),
                 // ACTIVE users only (inativos have their own category), except the caller and the hidden Master
                 // (the spare-the-signed-in rule is server-side).
-                CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId)).ExecuteDeleteAsync(ct),
-                // Empty the program trash: permanently delete every soft-deleted program.
+                CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId))
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(u => u.IsDeleted, true)
+                        .SetProperty(u => u.DeletedAt, now)
+                        .SetProperty(u => u.DeletedBy, actor), ct),
+                // Empty the program trash: permanently delete every soft-deleted program (favorites cascade).
                 CleanupId.ProgramasDeletados => await db.Programs.IgnoreQueryFilters().Where(p => p.IsDeleted).ExecuteDeleteAsync(ct),
                 // Empty the user trash: permanently delete every soft-deleted user.
                 CleanupId.UsuariosDeletados => await db.Users.IgnoreQueryFilters().Where(u => u.IsDeleted).ExecuteDeleteAsync(ct),
