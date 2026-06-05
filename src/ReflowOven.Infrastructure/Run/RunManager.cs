@@ -24,6 +24,8 @@ public sealed class RunManager(
 
     public RunStatusDto? GetStatus() => _active is { } run ? BuildStatus(run) : null;
 
+    public bool IsRunning => _active is { Status: RunStatus.Running };
+
     public async Task<RunStatusDto> StartAsync(string programId, Guid? userId, string? userName, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);
@@ -57,10 +59,8 @@ public sealed class RunManager(
                 ? new ProcessLimits(DomainConstants.ConfigTempMax, DomainConstants.ConfigFanRpmMax, DomainConstants.ConfigVoltageMin, DomainConstants.ConfigVoltageMax, DomainConstants.ConfigExtraTimeMax)
                 : new ProcessLimits(settings.Oven.MaxTemp, settings.Oven.MaxFanRpm, settings.Voltage.Min, settings.Voltage.Max, settings.Process.MaxExtraTimeSec);
 
-            program.RunCount++;
-            program.LastUsed = clock.UtcNow;
-            await db.SaveChangesAsync(ct);
-
+            // Count the run only AFTER the board accepts it — a board that refuses to start must not inflate
+            // RunCount/LastUsed (and the "mais usados" ranking) for an execution that never happened.
             try
             {
                 await board.StartProgramAsync(profile, limits, ct);
@@ -75,6 +75,9 @@ public sealed class RunManager(
                 try { await db.SaveChangesAsync(ct); } catch { /* best-effort audit; the start failure is the real error */ }
                 throw;
             }
+
+            program.RunCount++;
+            program.LastUsed = clock.UtcNow;
 
             var run = new ActiveRun
             {

@@ -12,13 +12,20 @@ public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board)
         // The dev Master is a hidden superuser — it must never surface in any count or ranking shown to an
         // Admin/Regular (it isn't in the Usuários list either), so every user query here excludes it.
         var visibleUsers = db.Users.Where(u => u.Type != UserType.Master);
+        // One pass over Users instead of three separate COUNT scans (active / inactive / admin).
+        var userCounts = await visibleUsers.GroupBy(_ => 1).Select(g => new
+        {
+            Active = g.Count(u => u.Status == UserStatus.Ativo),
+            Inactive = g.Count(u => u.Status == UserStatus.Inativo),
+            Admins = g.Count(u => u.Type == UserType.Admin),
+        }).FirstOrDefaultAsync(ct);
         var stats = new DiagnosticsStatsDto(
             Programs: await db.Programs.CountAsync(ct),
             Executions: await db.Executions.CountAsync(ct),
             Failures: await db.Errors.CountAsync(ct),
-            ActiveUsers: await visibleUsers.CountAsync(u => u.Status == UserStatus.Ativo, ct),
-            InactiveUsers: await visibleUsers.CountAsync(u => u.Status == UserStatus.Inativo, ct),
-            Admins: await visibleUsers.CountAsync(u => u.Type == UserType.Admin, ct));
+            ActiveUsers: userCounts?.Active ?? 0,
+            InactiveUsers: userCounts?.Inactive ?? 0,
+            Admins: userCounts?.Admins ?? 0);
 
         var counts = await db.Errors.GroupBy(e => e.FaultTypeCode)
             .Select(g => new { Code = g.Key, Count = g.Count() })

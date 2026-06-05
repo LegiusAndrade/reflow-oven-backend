@@ -50,6 +50,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(u => u.DeletedBy).HasMaxLength(DomainConstants.UserNameMaxLength);
             e.HasQueryFilter(u => !u.IsDeleted); // soft-delete: deleted users are hidden everywhere by default
             e.HasIndex(u => u.IsDeleted);
+            e.HasIndex(u => u.LoginCount); // backs the Diagnóstico "top users by logins" ranking
             e.HasMany(u => u.ActivityStats).WithOne(s => s.User!).HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
             e.OwnsOne(u => u.Preferences, p => p.ToJson());
         });
@@ -81,6 +82,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.OwnsMany(p => p.Segments, o => o.ToJson());
             e.HasQueryFilter(p => !p.IsDeleted);
             e.HasIndex(p => p.IsDeleted);
+            e.HasIndex(p => p.RunCount); // backs the Diagnóstico "top programs by runs" ranking + Used/Unused filter
         });
 
         b.Entity<FavoriteProgram>(e =>

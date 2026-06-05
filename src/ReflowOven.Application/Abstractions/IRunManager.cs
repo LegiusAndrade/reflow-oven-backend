@@ -10,6 +10,10 @@ public interface IRunManager
     /// <summary>Status of the active run, or null when idle.</summary>
     RunStatusDto? GetStatus();
 
+    /// <summary>True while a run is active and still running — a cheap state check for the control loop,
+    /// so it doesn't build a full <see cref="RunStatusDto"/> just to read the status each tick.</summary>
+    bool IsRunning { get; }
+
     /// <summary>Start a run for <paramref name="programId"/> on behalf of the given user (null = technician/anonymous).</summary>
     Task<RunStatusDto> StartAsync(string programId, Guid? userId, string? userName, CancellationToken ct = default);
 

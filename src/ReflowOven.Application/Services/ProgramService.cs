@@ -13,7 +13,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
             : await db.Favorites.Where(f => f.UserId == userId).Select(f => f.ProgramId).ToListAsync(ct);
         var favSet = favIds.ToHashSet();
 
-        IQueryable<ReflowProgram> query = db.Programs;
+        IQueryable<ReflowProgram> query = db.Programs.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
@@ -29,32 +29,42 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
             _ => query,
         };
 
-        // peakTemp/totalTime are derived from the jsonb profile, so order in memory.
-        var all = await query.ToListAsync(ct);
-        IEnumerable<ReflowProgram> sorted = q.Sort switch
-        {
-            // Never-run programs fall back to CreatedAt, so a just-created one isn't stuck at the bottom.
-            ProgramSort.Recent => all.OrderByDescending(p => p.LastUsed ?? p.CreatedAt),
-            ProgramSort.MostUsed => all.OrderByDescending(p => p.RunCount),
-            ProgramSort.Name => all.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-            ProgramSort.Temp => all.OrderByDescending(Peak),
-            ProgramSort.Duration => all.OrderByDescending(Total),
-            // Default: user programs first, most-recent (run, else created) first, name as the tiebreak.
-            _ => all.OrderBy(p => p.IsSeed)
-                    .ThenByDescending(p => p.LastUsed ?? p.CreatedAt)
-                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        };
-
-        var list = sorted.ToList();
         var page = Math.Max(1, q.Page);
         var size = Math.Clamp(q.PageSize, 1, DomainConstants.ProgramPageSizeMax);
-        var items = list.Skip((page - 1) * size).Take(size).Select(p => Map(p, favSet.Contains(p.Id))).ToList();
-        return new PagedResult<ProgramDto>(items, list.Count, page, size);
+
+        // peakTemp/totalTime are derived from the jsonb profile, so those two sorts must still order in
+        // memory (and load the matching set). Every other sort is on scalar columns, so let PostgreSQL order
+        // + paginate and fetch ONLY the page (+ a COUNT) instead of materializing the whole catalog — jsonb
+        // and all — on every gallery view.
+        if (q.Sort is ProgramSort.Temp or ProgramSort.Duration)
+        {
+            var all = await query.ToListAsync(ct);
+            var ordered = (q.Sort == ProgramSort.Temp ? all.OrderByDescending(Peak) : all.OrderByDescending(Total)).ToList();
+            var slice = ordered.Skip((page - 1) * size).Take(size).Select(p => Map(p, favSet.Contains(p.Id))).ToList();
+            return new PagedResult<ProgramDto>(slice, all.Count, page, size);
+        }
+
+        query = q.Sort switch
+        {
+            // Never-run programs fall back to CreatedAt, so a just-created one isn't stuck at the bottom.
+            ProgramSort.Recent => query.OrderByDescending(p => p.LastUsed ?? p.CreatedAt),
+            ProgramSort.MostUsed => query.OrderByDescending(p => p.RunCount).ThenByDescending(p => p.LastUsed ?? p.CreatedAt),
+            ProgramSort.Name => query.OrderBy(p => p.Name.ToLower()),
+            // Default: user programs first, most-recent (run, else created) first, name as the tiebreak.
+            _ => query.OrderBy(p => p.IsSeed)
+                      .ThenByDescending(p => p.LastUsed ?? p.CreatedAt)
+                      .ThenBy(p => p.Name.ToLower()),
+        };
+
+        var total = await query.CountAsync(ct);
+        var rows = await query.Skip((page - 1) * size).Take(size).ToListAsync(ct);
+        var items = rows.Select(p => Map(p, favSet.Contains(p.Id))).ToList();
+        return new PagedResult<ProgramDto>(items, total, page, size);
     }
 
     public async Task<ProgramDto> GetAsync(string id, Guid? userId, CancellationToken ct = default)
     {
-        var p = await db.Programs.FirstOrDefaultAsync(x => x.Id == id, ct)
+        var p = await db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new NotFoundException("Programa não encontrado.");
         var fav = userId is not null && await db.Favorites.AnyAsync(f => f.UserId == userId && f.ProgramId == id, ct);
         return Map(p, fav);
@@ -129,7 +139,7 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
     /// <summary>Master "trash": soft-deleted programs (newest first), with who/when. Seed programs included.</summary>
     public async Task<IReadOnlyList<DeletedProgramDto>> ListDeletedAsync(CancellationToken ct = default)
     {
-        var rows = await db.Programs.IgnoreQueryFilters()
+        var rows = await db.Programs.IgnoreQueryFilters().AsNoTracking()
             .Where(p => p.IsDeleted)
             .OrderByDescending(p => p.DeletedAt)
             .ToListAsync(ct);
@@ -229,6 +239,14 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
                     throw new ValidationAppException($"Temperatura fora da faixa {DomainConstants.PointTempMin}..{DomainConstants.PointTempMax} °C.");
                 return new ProfilePoint { T = p.T, Temp = p.Temp };
             }).ToList();
+
+            // The run interpolation (TempAt/TotalTime) assumes a t=0 baseline and strictly increasing times;
+            // reject anything else with a clean 400 instead of building a run with an incoherent timeline.
+            if (profile[0].T != 0)
+                throw new ValidationAppException("O perfil deve começar em t=0.");
+            for (var i = 1; i < profile.Count; i++)
+                if (profile[i].T <= profile[i - 1].T)
+                    throw new ValidationAppException("Os tempos do perfil devem ser estritamente crescentes.");
         }
         else
         {
@@ -318,15 +336,6 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
     private static double Peak(ReflowProgram p) => p.Profile.Count > 0 ? p.Profile.Max(pt => pt.Temp) : 0;
     private static double Total(ReflowProgram p) => ProfileBuilder.TotalTime(p.Profile);
 
-    // Per-item delete authority for the current caller: the Admin manages every program; the dev Master may
-    // only remove programs IT created (others don't even show a delete control); nobody else deletes here.
-    private bool CanDelete(Guid? createdById) => current.Role switch
-    {
-        UserType.Admin => true,
-        UserType.Master => createdById is not null && createdById == current.UserId,
-        _ => false,
-    };
-
     private ProgramDto Map(ReflowProgram p, bool favorite) => new(
         p.Id,
         p.Name,
@@ -337,5 +346,5 @@ public sealed class ProgramService(IAppDbContext db, IClock clock, AuditService 
         p.Profile.Select(pt => new ProfilePointDto(pt.T, pt.Temp)).ToList(),
         p.Segments?.Select(s => new ProfileSegmentDto(s.Temp, s.DurationSec, s.Ramp)).ToList(),
         favorite,
-        CanDelete(p.CreatedById));
+        current.CanDeleteOwnedBy(p.CreatedById));
 }

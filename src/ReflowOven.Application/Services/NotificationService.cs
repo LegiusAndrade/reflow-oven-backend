@@ -12,7 +12,7 @@ public sealed class NotificationService(IAppDbContext db, IClock clock, ICurrent
         bool unreadOnly = false, int limit = DomainConstants.NotificationFeedMax, CancellationToken ct = default)
     {
         var take = Math.Clamp(limit, 1, DomainConstants.NotificationFeedMax);
-        var q = db.Notifications.AsQueryable();
+        var q = db.Notifications.AsNoTracking();
         if (unreadOnly) q = q.Where(n => !n.Read);
         var rows = await q.OrderByDescending(n => n.At).Take(take).ToListAsync(ct);
         return rows.Select(NotificationDto.From).ToList();
@@ -61,7 +61,7 @@ public sealed class NotificationService(IAppDbContext db, IClock clock, ICurrent
     /// <summary>Master "trash": soft-deleted feed entries (newest-deleted first), capped to the feed max.</summary>
     public async Task<IReadOnlyList<DeletedNotificationDto>> ListDeletedAsync(CancellationToken ct = default)
     {
-        var rows = await db.Notifications.IgnoreQueryFilters()
+        var rows = await db.Notifications.IgnoreQueryFilters().AsNoTracking()
             .Where(n => n.IsDeleted)
             .OrderByDescending(n => n.DeletedAt)
             .Take(DomainConstants.NotificationFeedMax)

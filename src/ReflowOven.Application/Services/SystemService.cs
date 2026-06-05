@@ -87,41 +87,76 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
     /// </summary>
     public async Task<DatabaseAuditDto> GetDatabaseAuditAsync(CancellationToken ct = default)
     {
-        // Users — by status and role. The dev Master is a hidden superuser: it must never be counted in data
-        // an Admin can read (it isn't in the Usuários list either), so exclude it from every user count here.
+        // Users — total/active/admins in ONE aggregate pass. The dev Master is a hidden superuser: it must
+        // never be counted in data an Admin can read (it isn't in the Usuários list either), so it's excluded.
         var visibleUsers = db.Users.Where(u => u.Type != UserType.Master);
-        var usersTotal = await visibleUsers.CountAsync(ct);
-        var usersActive = await visibleUsers.CountAsync(u => u.Status == UserStatus.Ativo, ct);
-        var admins = await visibleUsers.CountAsync(u => u.Type == UserType.Admin, ct);
+        var u = await visibleUsers.GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Active = g.Count(x => x.Status == UserStatus.Ativo),
+            Admins = g.Count(x => x.Type == UserType.Admin),
+        }).FirstOrDefaultAsync(ct);
+        var usersTotal = u?.Total ?? 0;
+        var usersActive = u?.Active ?? 0;
+        var admins = u?.Admins ?? 0;
 
-        // Programs — bypass the soft-delete/seed query filter to count everything.
-        var allPrograms = db.Programs.IgnoreQueryFilters();
-        var programsTotal = await allPrograms.CountAsync(ct);
-        var programsDeleted = await allPrograms.CountAsync(p => p.IsDeleted, ct);
-        var programsSeed = await allPrograms.CountAsync(p => p.IsSeed && !p.IsDeleted, ct);
+        // Programs — bypass the soft-delete/seed query filter to count everything, in one pass.
+        var p = await db.Programs.IgnoreQueryFilters().GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Deleted = g.Count(x => x.IsDeleted),
+            Seed = g.Count(x => x.IsSeed && !x.IsDeleted),
+        }).FirstOrDefaultAsync(ct);
+        var programsTotal = p?.Total ?? 0;
+        var programsDeleted = p?.Deleted ?? 0;
+        var programsSeed = p?.Seed ?? 0;
         var programsActive = programsTotal - programsDeleted;
         var programsUser = programsActive - programsSeed;
 
         // Executions — by terminal status (Concluído / Falha).
-        var execTotal = await db.Executions.CountAsync(ct);
-        var execConcluido = await db.Executions.CountAsync(e => e.Status == ExecutionStatus.Concluido, ct);
-        var execFalha = await db.Executions.CountAsync(e => e.Status == ExecutionStatus.Falha, ct);
+        var ex = await db.Executions.GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Concluido = g.Count(x => x.Status == ExecutionStatus.Concluido),
+            Falha = g.Count(x => x.Status == ExecutionStatus.Falha),
+        }).FirstOrDefaultAsync(ct);
+        var execTotal = ex?.Total ?? 0;
+        var execConcluido = ex?.Concluido ?? 0;
+        var execFalha = ex?.Falha ?? 0;
 
         // Errors / falhas — by severity (Crítico / Alerta / Aviso).
-        var errTotal = await db.Errors.CountAsync(ct);
-        var errCritico = await db.Errors.CountAsync(e => e.Severity == ErrorSeverity.Critico, ct);
-        var errAlerta = await db.Errors.CountAsync(e => e.Severity == ErrorSeverity.Alerta, ct);
-        var errAviso = await db.Errors.CountAsync(e => e.Severity == ErrorSeverity.Aviso, ct);
+        var er = await db.Errors.GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Critico = g.Count(x => x.Severity == ErrorSeverity.Critico),
+            Alerta = g.Count(x => x.Severity == ErrorSeverity.Alerta),
+            Aviso = g.Count(x => x.Severity == ErrorSeverity.Aviso),
+        }).FirstOrDefaultAsync(ct);
+        var errTotal = er?.Total ?? 0;
+        var errCritico = er?.Critico ?? 0;
+        var errAlerta = er?.Alerta ?? 0;
+        var errAviso = er?.Aviso ?? 0;
 
         // Changes + notifications (with the unread tally).
         var changes = await db.Changes.CountAsync(ct);
-        var notifTotal = await db.Notifications.CountAsync(ct);
-        var notifUnread = await db.Notifications.CountAsync(n => !n.Read, ct);
+        var nt = await db.Notifications.GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Unread = g.Count(x => !x.Read),
+        }).FirstOrDefaultAsync(ct);
+        var notifTotal = nt?.Total ?? 0;
+        var notifUnread = nt?.Unread ?? 0;
 
         // System log — by level (INFO / Aviso / Erro). `LogLevel` is the domain enum (see Application GlobalUsings).
-        var logInfo = await db.SystemLog.CountAsync(l => l.Level == LogLevel.Info, ct);
-        var logAviso = await db.SystemLog.CountAsync(l => l.Level == LogLevel.Aviso, ct);
-        var logErro = await db.SystemLog.CountAsync(l => l.Level == LogLevel.Erro, ct);
+        var lg = await db.SystemLog.GroupBy(_ => 1).Select(g => new
+        {
+            Info = g.Count(x => x.Level == LogLevel.Info),
+            Aviso = g.Count(x => x.Level == LogLevel.Aviso),
+            Erro = g.Count(x => x.Level == LogLevel.Erro),
+        }).FirstOrDefaultAsync(ct);
+        var logInfo = lg?.Info ?? 0;
+        var logAviso = lg?.Aviso ?? 0;
+        var logErro = lg?.Erro ?? 0;
 
         return new DatabaseAuditDto(
             new UserAuditDto(usersTotal, usersActive, usersTotal - usersActive, admins),

@@ -23,7 +23,7 @@ public sealed class RunControlLoopService(
             {
                 try
                 {
-                    if (runManager.GetStatus() is { Status: RunStatus.Running })
+                    if (runManager.IsRunning)
                     {
                         await runManager.TickAsync(stoppingToken);
                     }
@@ -43,7 +43,7 @@ public sealed class RunControlLoopService(
 
                     // Don't leave a half-ticked run stuck as "Running" forever (which would make every
                     // future start fail with "Já existe uma execução em andamento"). Abort it cleanly.
-                    if (runManager.GetStatus() is { Status: RunStatus.Running })
+                    if (runManager.IsRunning)
                     {
                         try
                         {
