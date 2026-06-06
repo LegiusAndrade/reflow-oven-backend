@@ -30,10 +30,11 @@
       "console": "internalConsole"
     },
     {
-      // Debug com o .NET DENTRO do container (Dev Container na Pi) — nenhum SDK no host.
-      // Requer abrir a pasta via "Dev Containers: Reopen in Container" (ver .devcontainer/). A connection
-      // string aponta para o serviço "postgres" do compose (vem do env do container); aqui só ligamos a
-      // placa real. Usa a task "build (container)" (o "dotnet" do PATH do container, não ~/.dotnet).
+      // Debug com o .NET DENTRO do container (Dev Container na Pi). Abra a pasta via Remote-SSH na Pi e
+      // "Dev Containers: Reopen in Container" (ver .devcontainer/). Usa a task "build (container)" (o
+      // "dotnet" do PATH do container) e o profile "http" do launchSettings — HTTP only, porque o container
+      // não tem dev-cert HTTPS (o profile "https" quebra com "Unable to configure HTTPS endpoint").
+      // Postgres roda no host da Pi (docker compose up -d); com --network=host a API o acha em localhost:5432.
       "name": "Debug API (Docker na Pi)",
       "type": "coreclr",
       "request": "launch",
@@ -42,10 +43,14 @@
       "args": [],
       "cwd": "${workspaceFolder}/src/ReflowOven.Api",
       "stopAtEntry": false,
+      "launchSettingsProfile": "http",
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "Hardware__Mode": "Rs422",
-        "System__Mode": "Linux"
+        "ASPNETCORE_URLS": "http://localhost:5248",
+        // Stub do RS422 lança NotSupportedException — deixe Simulated até implementar o driver; aí troque para "Rs422".
+        "Hardware__Mode": "Simulated",
+        // OS control (nmcli/systemctl) não faz sentido dentro do container — Simulated. Para OS real use o fluxo "host .NET".
+        "System__Mode": "Simulated"
       },
       "serverReadyAction": {
         "action": "openExternally",
