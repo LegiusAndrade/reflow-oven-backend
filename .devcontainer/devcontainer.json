@@ -1,31 +1,32 @@
 {
-  // Dev Container para debugar com o .NET DENTRO do Docker da Raspberry — o host (Pi) só precisa do
-  // Docker, NÃO do SDK .NET. Fluxo: VS Code (note) --Remote-SSH--> Pi --Dev Containers--> container SDK.
+  // Dev Container para depurar com o .NET DENTRO do Docker da Raspberry — o host (Pi) só precisa do
+  // Docker, NÃO do SDK .NET. Use via Remote-SSH: conecte na Pi, abra a pasta do repo NA PI e rode
+  // "Dev Containers: Reopen in Container".
   //
-  // Como usar: conecte o Remote-SSH na Pi, abra esta pasta e rode no Command Palette
-  //   "Dev Containers: Reopen in Container"
-  // Isso sobe DOIS serviços (compose mesclado): "postgres" (do docker-compose.yml raiz) + "app" (o
-  // container de dev com o SDK, definido em .devcontainer/docker-compose.yml). Depure com a config
-  // de launch "Debug API (Docker na Pi)" (F5).
-  "name": "Reflow Oven — .NET 10 no Docker (Pi)",
+  // IMAGEM-based (sem docker-compose) de propósito: o mount do workspace é EXPLÍCITO
+  // (${localWorkspaceFolder}), à prova do bug de caminho relativo que tínhamos (o ".." resolvia para a
+  // pasta-pai do repo / home). Aqui /workspace = a pasta REAL aberta no VS Code na Pi.
+  //
+  // Postgres roda à parte no host da Pi:  docker compose up -d   (usa o docker-compose.yml da raiz).
+  // Com --network=host a API alcança o Postgres em localhost:5432 (igual ao appsettings).
+  "name": "Reflow Oven — .NET 10 (Pi)",
+  "image": "mcr.microsoft.com/dotnet/sdk:10.0",
 
-  // Mescla o compose raiz (traz o Postgres) com o override local (adiciona o serviço "app").
-  // A ordem importa: o segundo arquivo complementa/sobrescreve o primeiro.
-  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.yml"],
-  "service": "app",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
-  // O serviço "app" já roda "sleep infinity"; não deixe o devcontainer sobrescrever esse comando.
-  "overrideCommand": false,
-  // Ao fechar/derrubar o dev container, derruba o compose inteiro (inclui o Postgres).
-  "shutdownAction": "stopCompose",
-
-  // 5248 = API; 5432 = Postgres (útil p/ ligar um DBeaver/pgAdmin do note). Aparecem no painel PORTS.
-  "forwardPorts": [5248, 5432],
+  // 🔌 RS422: quando for ligar a serial, acrescente o device. Ex.:
+  //   "runArgs": ["--network=host", "--device=/dev/ttyAMA0"]
+  "runArgs": ["--network=host"],
 
   "customizations": {
     "vscode": {
-      "extensions": ["ms-dotnettools.csdevkit", "ms-dotnettools.csharp"]
+      "extensions": ["ms-dotnettools.csdevkit", "ms-dotnettools.csharp"],
+      "settings": {
+        // Usa o SDK/runtime da imagem; não tenta baixar (o SDK "global" exige polkit, que não há no container).
+        "dotnet.sdk.enableAutoAcquisition": false,
+        "dotnetAcquisitionExtension.sharedExistingDotnetPath": "/usr/share/dotnet/dotnet"
+      }
     }
   }
 }
