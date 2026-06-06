@@ -20,6 +20,21 @@
       "group": { "kind": "build", "isDefault": true }
     },
     {
+      // Build usado pelo "Debug API (Docker na Pi)": dentro do Dev Container o SDK está no PATH
+      // (imagem mcr.microsoft.com/dotnet/sdk), então chamamos "dotnet" direto, sem ~/.dotnet.
+      "label": "build (container)",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/ReflowOven.slnx",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": "build"
+    },
+    {
       "label": "test",
       "command": "${env:HOME}/.dotnet/dotnet",
       "type": "process",

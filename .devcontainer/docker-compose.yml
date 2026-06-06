@@ -1,0 +1,27 @@
+# Override de compose do Dev Container (mesclado com o ../docker-compose.yml raiz, que traz o "postgres").
+# Adiciona o serviço "app": o container com o SDK .NET 10 onde o código é compilado e depurado.
+# A Raspberry só precisa do Docker — nenhum .NET instalado no host.
+services:
+  app:
+    # Imagem oficial multi-arch: na Pi (arm64) o Docker puxa a variante arm64 automaticamente.
+    # Se a tag "10.0" não resolver, use "10.0-bookworm-slim" ou fixe um patch (ex.: "10.0.108").
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    working_dir: /workspace
+    # Mantém o container vivo; o VS Code Server e o debugger (vsdbg) são instalados dentro dele.
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+    environment:
+      # Dentro do container o Postgres está no host "postgres" (serviço do compose), não em localhost.
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=reflowoven;Username=reflow;Password=reflow"
+      # Hardware:Mode/System:Mode ficam na config de launch (escolha de debug), não aqui.
+
+    # 🔌 RS422 — DESCOMENTE e ajuste para o device da sua Pi para o container enxergar a serial.
+    #   Descubra com:  ls -l /dev/ttyAMA0 /dev/ttyS0 /dev/ttyUSB*   (e  dmesg | grep -i tty)
+    # O container roda como root, então o acesso à porta funciona sem mexer no grupo dialout.
+    # devices:
+    #   - "/dev/ttyAMA0:/dev/ttyAMA0"
+
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -30,6 +30,30 @@
       "console": "internalConsole"
     },
     {
+      // Debug com o .NET DENTRO do container (Dev Container na Pi) — nenhum SDK no host.
+      // Requer abrir a pasta via "Dev Containers: Reopen in Container" (ver .devcontainer/). A connection
+      // string aponta para o serviço "postgres" do compose (vem do env do container); aqui só ligamos a
+      // placa real. Usa a task "build (container)" (o "dotnet" do PATH do container, não ~/.dotnet).
+      "name": "Debug API (Docker na Pi)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build (container)",
+      "program": "${workspaceFolder}/src/ReflowOven.Api/bin/Debug/net10.0/ReflowOven.Api.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/ReflowOven.Api",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Hardware__Mode": "Rs422",
+        "System__Mode": "Linux"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)"
+      },
+      "console": "internalConsole"
+    },
+    {
       "name": "Attach to process (.NET)",
       "type": "coreclr",
       "request": "attach"

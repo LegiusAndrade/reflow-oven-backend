@@ -1,0 +1,31 @@
+{
+  // Dev Container para debugar com o .NET DENTRO do Docker da Raspberry — o host (Pi) só precisa do
+  // Docker, NÃO do SDK .NET. Fluxo: VS Code (note) --Remote-SSH--> Pi --Dev Containers--> container SDK.
+  //
+  // Como usar: conecte o Remote-SSH na Pi, abra esta pasta e rode no Command Palette
+  //   "Dev Containers: Reopen in Container"
+  // Isso sobe DOIS serviços (compose mesclado): "postgres" (do docker-compose.yml raiz) + "app" (o
+  // container de dev com o SDK, definido em .devcontainer/docker-compose.yml). Depure com a config
+  // de launch "Debug API (Docker na Pi)" (F5).
+  "name": "Reflow Oven — .NET 10 no Docker (Pi)",
+
+  // Mescla o compose raiz (traz o Postgres) com o override local (adiciona o serviço "app").
+  // A ordem importa: o segundo arquivo complementa/sobrescreve o primeiro.
+  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+
+  // O serviço "app" já roda "sleep infinity"; não deixe o devcontainer sobrescrever esse comando.
+  "overrideCommand": false,
+  // Ao fechar/derrubar o dev container, derruba o compose inteiro (inclui o Postgres).
+  "shutdownAction": "stopCompose",
+
+  // 5248 = API; 5432 = Postgres (útil p/ ligar um DBeaver/pgAdmin do note). Aparecem no painel PORTS.
+  "forwardPorts": [5248, 5432],
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-dotnettools.csdevkit", "ms-dotnettools.csharp"]
+    }
+  }
+}
