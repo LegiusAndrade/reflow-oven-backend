@@ -5,10 +5,73 @@ O histórico completo do que já foi entregue está em **`DONE.md`**. Tarefas do
 
 ## Em aberto
 
+- **🔁 Factory reset: responder ANTES de reiniciar (+ instabilidade do `:5248`).** O
+  `POST /api/maintenance/factory-reset` deve devolver **204 antes** de limpar/reiniciar — hoje, quando o
+  servidor cai/reinicia, a conexão é derrubada e o front recebe um **erro de conexão** (parece falha). O front
+  já trata o status 0 como "equipamento reiniciando" (FactoryResetModal, 2026‑06‑04), mas o ideal é o ack limpo.
+  Durante o teste o backend **caiu** (`:5248` → 000) ao acionar o reset — investigar se é o reset reiniciando ou
+  a **instabilidade geral do `:5248`** (que já caiu sozinho algumas vezes na sessão).
+
+- **🔒 Lockout: enviar o tempo restante.** A resposta de "Muitas tentativas de login" deve incluir os
+  **segundos restantes** (ex.: `retryAfterSeconds` no `LoginResult`, ou o header `Retry-After`) — hoje só diz
+  "aguarde alguns minutos". Com isso o front mostra um **countdown** ("tente novamente em Xs") no lugar da
+  mensagem vaga. (Front 2026‑06‑04: o erro do login já quebra linha + vira toast; falta só o tempo preciso.)
+
 - **#3 — Notificações faltantes.** "Execução abortada" → `kind: warning` já feito; faltam **falha da placa**
   (E-1xx) e **OTA disponível** — gerar a entrada no feed do sino com o `kind` correto.
-- **#7 — RS422 / hardware real + `LinuxSystemController`.** Grande, futuro: protocolo STM32 (RS422) e o SO do
-  OrangePi (hoje `SimulatedPowerBoard` / `SimulatedSystemController`).
+- **#7 — RS422 / hardware real + `LinuxSystemController`.** Grande, futuro: o SO do OrangePi
+  (`LinuxSystemController`) e o **protocolo STM32 (RS422)** — hoje `SimulatedPowerBoard` /
+  `SimulatedSystemController`. O firmware da power (`../reflow-oven-firmware`) **já implementa o lado
+  SLAVE** deste protocolo (`reflow_oven/inc/comms.h` + `src/comms.cpp`, modelo em `model.h`); falta o
+  `Rs422PowerBoard` (`Infrastructure/Hardware`) falar o mesmo wire format. Manter os dois em lock-step.
+
+  ### Como o backend deve se comunicar com a power (RS422)
+
+  - **Link.** RS422 full-duplex, **115200 8N1**, sem DE. O **control board (este backend) é o MASTER**
+    (envia REQUEST, espera RESPONSE/NACK); a power é o **SLAVE**. Poll de telemetria ~1 Hz (o
+    `RunControlLoopService` já tica a 1 Hz) via `GET_STATUS`.
+  - **Frame.** Cada frame é **COBS-encodado** e terminado por **`0x00`** (delimitador). Decodificado:
+    `header(6) + payload(0..N) + CRC-32(4)`.
+    - **header (6 B):** `ver(1)=1, type(1), seq(1), cmd(1), status(1), len(1)`.
+    - `type`: **REQUEST=0x01**, RESPONSE=0x02, NACK=0x03. `seq`: master numera, slave ecoa. Em REQUEST
+      `status=0`; em RESPONSE/NACK é o status. `len` = tamanho do payload.
+    - **CRC-32** (poly `0xEDB88320`, = `System.IO.Hashing.Crc32`) sobre `header+payload`, anexado
+      **big-endian** (MSB primeiro; o `Crc32` do .NET dá little-endian → inverter). Depois COBS no
+      conjunto, depois o `0x00`.
+  - **Status** (RESPONSE/NACK): `OK=0x00, UNKNOWN_CMD=0x01, BAD_PARAM=0x02, BUSY=0x03, ERROR=0xFF`.
+  - **Endianness do payload:** campos **little-endian**; floats IEEE-754 LE (`BitConverter`). Só o
+    trailer CRC-32 é big-endian.
+
+  **Comandos** (um por método de `IPowerBoard`):
+
+  | `cmd` | método | REQUEST payload | RESPONSE payload |
+  |------|--------|-----------------|------------------|
+  | `0x01` GET_STATUS | `ReadAsync` | — | SensorReadings (19 B) |
+  | `0x02` SET_CONFIGURATION | `ApplyControlConfigAsync` | Config (24 B) | — |
+  | `0x03` GET_SERIAL_NUMBER | (identidade) | — | `serial:u32` |
+  | `0x04` SET_SERIAL_NUMBER | — | `serial:u32` | — |
+  | `0x05` START_PROGRAM | `StartProgramAsync` | `count:u8` + count×`{time_s:u16, target_c:i16}` | — |
+  | `0x06` STOP | `StopAsync` | — | — |
+  | `0x07` SET_CALIBRATION | `ApplyCalibrationAsync` | blob (layout reservado) | — |
+  | `0x08` SELF_TEST | `RunSelfTestAsync` | `id:u8` | `id:u8, result:u8` (0=pass,1=fail,2=not-run) |
+  | `0x09` DRIVE_OUTPUT | `DriveOutputAsync` | `set_mv:u16` | `set_mv:u16, measured_mv:u16` |
+  | `0x0A` GET_IDENTITY | `GetIdentityAsync` | — | `serial:u32, hours_min:u32, ver_len:u8, version[ver_len]` |
+
+  - **GET_STATUS → SensorReadings (19 B, LE):** `state:u8, oven_temp_x10:i16, board_temp_x10:i16,
+    vbus_mv:u16, current_ma:i16, fan_oven_rpm:u16, fan_board_rpm:u16, fault_code:u16, hours_min:u32`.
+    Mapear: `OvenTempC=oven_temp_x10/10`, `BoardTempC=board_temp_x10/10`, `VoltageV=vbus_mv/1000`,
+    `CurrentA=current_ma/1000`, `OvenFanRpm`, `BoardFanRpm`. `fault_code≠0` ⇒ `FaultRaised`.
+  - **SET_CONFIGURATION → Config (24 B, LE):** `kp:f32, ki:f32, kd:f32, max_oven_temp_c:f32,
+    max_vbus_mv:u16, min_vbus_mv:u16, max_fan_rpm:u16, max_extra_time_sec:u16` (PID de `Settings` +
+    `ProcessLimits`: MaxTemp→max_oven_temp_c, VoltageMax→max_vbus_mv, VoltageMin→min_vbus_mv,
+    MaxFanRpm→max_fan_rpm, MaxExtraTimeSec→max_extra_time_sec).
+  - **Fluxo de run.** `StartProgramAsync(profile, limits)` ⇒ enviar **SET_CONFIGURATION** (limits) e
+    depois **START_PROGRAM** (profile). `StopAsync` ⇒ STOP.
+
+  **Estado atual da power:** `GET_STATUS` / `SET_CONFIGURATION` / `GET_IDENTITY` completos fim-a-fim; os
+  comandos que tocam o estágio de potência (START/STOP/DRIVE/SELF_TEST/CALIBRATION) já **decodificam e
+  respondem OK**, mas a ação no aquecedor depende do controlador PID/reflow da power (ainda não
+  construído). Então telemetria + config já funcionam; o resto ack sem acionar potência por enquanto.
 - **#9 — Log de Operação: tela do front.** O backend está pronto e Master-only; falta o front montar o
   visualizador contra o contrato (`GET /api/operation-log`). *(time do front)*
 - **Ops / Lucas.** `git push` da `develop`; segredos reais de produção (`Jwt`/`Master`/`Admin`/`Regular`) via
