@@ -15,6 +15,7 @@ namespace ReflowOven.Infrastructure.BackgroundServices;
 /// </summary>
 public sealed class SystemMonitorService(
     ISystemController system,
+    IBoardGpio gpio,
     IServiceScopeFactory scopeFactory,
     IClock clock,
     IEmailSender email,
@@ -26,6 +27,7 @@ public sealed class SystemMonitorService(
     private bool? _lastOnline;
     private string? _lastNotifiedVersion;
     private bool? _lastDiskLow;
+    private bool? _lastPowerGood;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -101,6 +103,23 @@ public sealed class SystemMonitorService(
                 await RaiseDiskLowAsync(freePct, metrics.DiskFreeGB, metrics.DiskTotalGB, ct);
             _lastDiskLow = low;
         }
+
+        // Power-good: notify on a transition (skip the first-poll baseline). Polled at the monitor cadence —
+        // for a faster reaction a GPIO edge interrupt could drive this instead. No-op under Simulated (always good).
+        var powerGood = gpio.ReadPowerGood();
+        if (_lastPowerGood is bool prevPg && prevPg != powerGood)
+        {
+            await RaiseAsync(
+                powerGood ? NotificationFeedKind.Info : NotificationFeedKind.Error,
+                powerGood ? "Alimentação restabelecida" : "Falha de alimentação",
+                powerGood
+                    ? "O sinal de power-good foi restabelecido."
+                    : "O sinal de power-good caiu — verifique a alimentação do equipamento.",
+                ct);
+            await RecordCommAsync(OperationObject.Sistema, "power-good",
+                [OperationField.Of("estado", powerGood ? "ok" : "falha")], ct);
+        }
+        _lastPowerGood = powerGood;
     }
 
     private async Task RaiseDiskLowAsync(double freePct, double freeGB, double totalGB, CancellationToken ct)

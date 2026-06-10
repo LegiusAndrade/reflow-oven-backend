@@ -82,9 +82,15 @@ public static class DependencyInjection
         services.AddHttpClient();
         var systemMode = config.GetSection(SystemOptions.Section)["Mode"];
         if (string.Equals(systemMode, "Linux", StringComparison.OrdinalIgnoreCase))
+        {
             services.AddSingleton<ISystemController, LinuxSystemController>();
+            services.AddSingleton<IBoardGpio, LinuxBoardGpio>();
+        }
         else
+        {
             services.AddSingleton<ISystemController, SimulatedSystemController>();
+            services.AddSingleton<IBoardGpio, SimulatedBoardGpio>();
+        }
         services.AddHostedService<SystemMonitorService>();
 
         return services;

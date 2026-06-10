@@ -46,6 +46,10 @@ O histórico completo do que já foi entregue está em **`DONE.md`**. Tarefas do
   - **Status** (RESPONSE/NACK): `OK=0x00, UNKNOWN_CMD=0x01, BAD_PARAM=0x02, BUSY=0x03, ERROR=0xFF`.
   - **Endianness do payload:** campos **little-endian**; floats IEEE-754 LE (`BitConverter`). Só o
     trailer CRC-32 é big-endian.
+  - **Unidade de tensão:** o barramento é **0–180 VDC**, carregado em **centivolts** (×100, 2 casas:
+    180,00 V ↔ `18000`) pra caber num `u16` — vale pra `vbus`, `min/max_vbus` (config) e o sweep do
+    `DRIVE_OUTPUT`, **apesar do sufixo `_mv`** nos nomes. Os rails de baixa tensão (`vreg`/`pd`/`vdda`)
+    seguem em **mV**.
 
   **Comandos** (um por método de `IPowerBoard`):
 
@@ -68,8 +72,9 @@ O histórico completo do que já foi entregue está em **`DONE.md`**. Tarefas do
     não responde a poll:** `state:u8, fault_code:u16, fault_flags:u16, oven_temp_x10:i16,
     board_temp_x10:i16, vbus_mv:u16, vreg_mv:u16, pd_mv:u16, current_ma:i16, fan_intake_rpm:u16,
     fan_exhaust_rpm:u16, fan_board_rpm:u16, duty_intake:u8, duty_exhaust:u8, duty_board:u8,
-    mcu_temp_x10:i16, vdda_mv:u16, reset_reason:u8, hours_min:u32`. Escala: temp `/10` (°C), tensão
-    `/1000` (V), corrente `/1000` (A). `fault_flags` é bitfield (bit0 TC, 1 NTC, 2 over-temp, 3 OV, 4 UV,
+    mcu_temp_x10:i16, vdda_mv:u16, reset_reason:u8, hours_min:u32`. Escala: temp `/10` (°C), **`vbus`
+    `/100`** (centivolts — 0–180 VDC cabe num u16), demais tensões (`vreg`/`pd`/`vdda`) `/1000` (mV),
+    corrente `/1000` (A). `fault_flags` é bitfield (bit0 TC, 1 NTC, 2 over-temp, 3 OV, 4 UV,
     5 OC, 6 gate, 7 PG, 8 fan, 9 comms-loss); `fault_code≠0` ⇒ `FaultRaised`. O backend **cacheia o
     último push** e o `ReadAsync` devolve essa cópia. **SensorReadings precisa crescer** (VREG/PD, os 3
     fans + os 3 duties, o fault bitfield e a saúde do MCU).

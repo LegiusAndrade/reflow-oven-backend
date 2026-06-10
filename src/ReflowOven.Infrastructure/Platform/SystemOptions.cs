@@ -28,4 +28,20 @@ public sealed class SystemOptions
 
     /// <summary>How often the background monitor polls central-server reachability + OTA status (seconds, min 10).</summary>
     public int MonitorIntervalSeconds { get; set; } = 60;
+
+    // --- Hardware clock (ISL1208 RTC) ---------------------------------------------------------------
+    /// <summary>Hardware-RTC device written on a manual time-set so the clock survives a power cycle. The
+    /// kernel reads it back into the system clock at boot (needs the device-tree overlay, e.g.
+    /// <c>dtoverlay=i2c-rtc,isl1208</c>).</summary>
+    public string RtcDevice { get; set; } = "/dev/rtc0";
+
+    // --- Control-board GPIO (BCM/logical pin numbers; used when Mode=Linux) -------------------------
+    /// <summary>Comms-activity LED — toggled on each frame received from the power board.</summary>
+    public int CommLedPin { get; set; } = 13;
+
+    /// <summary>Status LED — lit while the service is running.</summary>
+    public int StatusLedPin { get; set; } = 6;
+
+    /// <summary>Power-good input (true = power good).</summary>
+    public int PowerGoodPin { get; set; } = 19;
 }

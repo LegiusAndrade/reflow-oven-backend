@@ -191,8 +191,23 @@ public sealed class LinuxSystemController(
             map.GetValueOrDefault("NTP") == "yes");
     }
 
-    public async Task SetTimeAsync(DateTimeOffset time, CancellationToken ct = default) =>
-        await RunPrivileged("timedatectl", ct, "set-time", time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss"));
+    public async Task SetTimeAsync(DateTimeOffset time, CancellationToken ct = default)
+    {
+        var set = await ProcessRunner.RunAsync("timedatectl",
+            ["set-time", time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")], ct);
+        if (!set.Ok)
+        {
+            logger.LogError("timedatectl set-time falhou ({Code}): {Err}", set.ExitCode, set.StdErr);
+            return;
+        }
+        // Persist to the ISL1208 hardware RTC so a manually-set time survives a power cycle (the kernel reads
+        // the RTC back into the system clock at boot, given the i2c-rtc,isl1208 overlay). Best-effort: a dev
+        // box / missing RTC just logs and the system time still changed.
+        var rtc = await ProcessRunner.RunAsync("hwclock", ["--systohc", "-f", _o.RtcDevice], ct);
+        if (!rtc.Ok)
+            logger.LogWarning("hwclock --systohc ({Rtc}) falhou ({Code}): {Err} — RTC ausente?",
+                _o.RtcDevice, rtc.ExitCode, rtc.StdErr);
+    }
 
     public async Task SetNtpAsync(bool enabled, CancellationToken ct = default) =>
         await RunPrivileged("timedatectl", ct, "set-ntp", enabled ? "true" : "false");
