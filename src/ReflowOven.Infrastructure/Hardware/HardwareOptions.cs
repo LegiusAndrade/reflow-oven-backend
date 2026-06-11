@@ -22,6 +22,11 @@ public sealed class HardwareOptions
     /// <summary>Link speed — the protocol runs at 115200 8N1 (must match the firmware).</summary>
     public int BaudRate { get; set; } = 115200;
 
+    /// <summary>BCM GPIO of the RS422 transceiver's direction/driver-enable pin (RE̅/DE). Held HIGH so the
+    /// driver stays enabled for full-duplex RS422 (the board was converted from RS485). -1 disables it (e.g.
+    /// a hardware pull-up already holds it). Needs GPIO access (the /dev/gpiomem device in the container).</summary>
+    public int DePin { get; set; } = 4;
+
     /// <summary>How long to wait for a RESPONSE/NACK to a REQUEST before retrying (ms).</summary>
     public int RequestTimeoutMs { get; set; } = 500;
 

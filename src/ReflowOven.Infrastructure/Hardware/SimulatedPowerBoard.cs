@@ -17,6 +17,9 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
     public event EventHandler<FaultRaised>? FaultRaised;
 #pragma warning restore CS0067
 
+    /// <summary>The simulated link is always up.</summary>
+    public bool IsConnected => true;
+
     public Task<SensorReadings> ReadAsync(CancellationToken ct = default)
     {
         double ovenSet;

@@ -82,16 +82,23 @@ public static class DependencyInjection
         services.AddHttpClient();
         var systemMode = config.GetSection(SystemOptions.Section)["Mode"];
         if (string.Equals(systemMode, "Linux", StringComparison.OrdinalIgnoreCase))
-        {
             services.AddSingleton<ISystemController, LinuxSystemController>();
-            services.AddSingleton<IBoardGpio, LinuxBoardGpio>();
-        }
         else
-        {
             services.AddSingleton<ISystemController, SimulatedSystemController>();
+
+        // The control-board GPIO (LEDs/power-good) is selected independently of the OS controller via
+        // System:GpioMode (falls back to System:Mode). This lets real GPIO run while nmcli/systemd stay
+        // simulated — e.g. driving the LEDs from inside the dev container without a working systemd.
+        var gpioMode = config.GetSection(SystemOptions.Section)["GpioMode"] ?? systemMode;
+        if (string.Equals(gpioMode, "Linux", StringComparison.OrdinalIgnoreCase))
+            services.AddSingleton<IBoardGpio, LinuxBoardGpio>();
+        else
             services.AddSingleton<IBoardGpio, SimulatedBoardGpio>();
-        }
+
+        services.AddSingleton<IControlHealth, ControlHealth>();
         services.AddHostedService<SystemMonitorService>();
+        services.AddHostedService<ControlHealthService>(); // samples the control board's own health
+        services.AddHostedService<StatusLedService>();     // drives the STATUS LED blink-code pattern (GPIO6)
 
         return services;
     }

@@ -33,4 +33,9 @@ public interface IPowerBoard
 
     /// <summary>Raised when the board reports a fault (over-temp, over-current, RS422 loss, …).</summary>
     event EventHandler<FaultRaised>? FaultRaised;
+
+    /// <summary>True while the RS422 link is alive (a status frame arrived within the watchdog window). The
+    /// control board's STATUS LED uses this; the power board's OWN faults (over-temp, over-current, …) show
+    /// on its own LED and reach the operator via the UI — they are not mirrored on the control board.</summary>
+    bool IsConnected { get; }
 }

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Device.Gpio;
 using System.IO.Ports;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -45,6 +46,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Lock _stateGate = new();
     private SerialPort? _port;
+    private GpioController? _deGpio;        // holds the RS422 transceiver DE/TX-enable pin HIGH (full-duplex)
     private readonly Task _linkTask;
     private readonly Task _houseTask;
 
@@ -57,6 +59,12 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
 
     public event EventHandler<FaultRaised>? FaultRaised;
 
+    /// <summary>True while the RS422 link is alive (a recent status frame). See <see cref="IPowerBoard.IsConnected"/>.</summary>
+    public bool IsConnected
+    {
+        get { lock (_stateGate) return !_offline; }
+    }
+
     public Rs422PowerBoard(IOptions<HardwareOptions> opts, IClock clock, IBoardGpio gpio, ILogger<Rs422PowerBoard> logger)
     {
         _opts = opts.Value;
@@ -66,8 +74,29 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         var now = clock.UtcNow;
         _lastRxAt = now;   // grace period before the offline watchdog can trip
         _lastTxAt = now;
+        AssertTransmitEnable(); // drive the transceiver into transmit mode before the link starts
         _linkTask = Task.Run(() => LinkLoopAsync(_cts.Token));
         _houseTask = Task.Run(() => HousekeepingLoopAsync(_cts.Token));
+    }
+
+    /// <summary>Hold the RS422 transceiver's direction pin HIGH so it stays in transmit / driver-enabled mode
+    /// (full-duplex RS422 — no per-frame DE toggling, since the board was converted from RS485). Best-effort:
+    /// missing GPIO just logs and the link still runs (a hardware pull-up may already hold it).</summary>
+    private void AssertTransmitEnable()
+    {
+        if (_opts.DePin < 0) return;
+        try
+        {
+            _deGpio = new GpioController();
+            _deGpio.OpenPin(_opts.DePin, PinMode.Output, PinValue.High);
+            _logger.LogInformation("RS422: DE/TX-enable em GPIO{Pin} = HIGH (full-duplex).", _opts.DePin);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RS422: não consegui acionar o DE/TX-enable (GPIO{Pin}); o transceiver pode não transmitir.", _opts.DePin);
+            try { _deGpio?.Dispose(); } catch { /* ignore */ }
+            _deGpio = null;
+        }
     }
 
     // ============================================================================================
@@ -467,6 +496,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     {
         _cts.Cancel();
         try { _port?.Dispose(); } catch { /* ignore */ }
+        try { _deGpio?.Dispose(); } catch { /* ignore */ } // releases the DE pin (back to input)
         try { Task.WaitAll([_linkTask, _houseTask], TimeSpan.FromSeconds(2)); } catch { /* best-effort */ }
         _cts.Dispose();
         _txGate.Dispose();
