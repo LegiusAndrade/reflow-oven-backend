@@ -15,9 +15,15 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
-  // 🔌 RS422: quando for ligar a serial, acrescente o device. Ex.:
-  //   "runArgs": ["--network=host", "--device=/dev/ttyAMA0"]
-  "runArgs": ["--network=host"],
+  // 🔌 Devices passados pro container:
+  //   /dev/gpiomem + /dev/gpiochip0 → GPIO (LEDs STATUS/COMM, power-good, DE/TX-enable do RS422) via System.Device.Gpio (Pi 4).
+  //   /dev/ttyAMA0 → UART RS422 (PL011 em GPIO14/15).
+  // Rodar como root no container (default) já basta pra acessar os devices (root:gpio/dialout, modo 660).
+  "runArgs": ["--network=host", "--device=/dev/gpiomem", "--device=/dev/gpiochip0", "--device=/dev/ttyAMA0"],
+
+  // System.Device.Gpio (driver do Pi 4) precisa da libgpiod p/ a parte de interrupção — a imagem .NET
+  // (Ubuntu) não traz. Instala no setup do container (roda como root) p/ os LEDs/power-good/DE funcionarem.
+  "postCreateCommand": "apt-get update && apt-get install -y libgpiod-dev",
 
   "customizations": {
     "vscode": {

@@ -47,10 +47,13 @@
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "ASPNETCORE_URLS": "http://localhost:5248",
-        // Stub do RS422 lança NotSupportedException — deixe Simulated até implementar o driver; aí troque para "Rs422".
-        "Hardware__Mode": "Simulated",
+        // RS422 real: driver implementado; porta /dev/ttyAMA0 (PL011 em GPIO14/15). DE/TX-enable em GPIO4.
+        // Precisa do --device=/dev/ttyAMA0 (e /dev/gpiomem p/ o DE) no devcontainer.json + Rebuild Container.
+        "Hardware__Mode": "Rs422",
         // OS control (nmcli/systemctl) não faz sentido dentro do container — Simulated. Para OS real use o fluxo "host .NET".
-        "System__Mode": "Simulated"
+        "System__Mode": "Simulated",
+        // GPIO real (LEDs/power-good) mesmo com o OS simulado — exige os --device no devcontainer.json + Rebuild Container.
+        "System__GpioMode": "Linux"
       },
       "serverReadyAction": {
         "action": "openExternally",
