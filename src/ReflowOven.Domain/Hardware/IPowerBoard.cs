@@ -10,8 +10,11 @@ public interface IPowerBoard
     /// <summary>Read one telemetry tick.</summary>
     Task<SensorReadings> ReadAsync(CancellationToken ct = default);
 
-    /// <summary>Begin driving the heater toward the given setpoint profile, bounded by <paramref name="limits"/>.</summary>
-    Task StartProgramAsync(IReadOnlyList<ProfilePoint> profile, ProcessLimits limits, CancellationToken ct = default);
+    /// <summary>Begin a run. <paramref name="segments"/> is the editable profile the power board drives — it ships
+    /// them and computes the setpoint curve itself (exact parabolas). <paramref name="profile"/> is the pre-sampled
+    /// curve the simulator interpolates for telemetry. Process/PID limits reach the board via
+    /// <see cref="ApplyControlConfigAsync"/>, not here.</summary>
+    Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default);
 
     /// <summary>Stop/abort the current run (heater off, fans to a safe state).</summary>
     Task StopAsync(CancellationToken ct = default);

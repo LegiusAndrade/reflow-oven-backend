@@ -47,6 +47,12 @@ public sealed class RunManager(
             if (profile.Count == 0)
                 throw new ConflictException("O programa não possui um perfil válido.");
 
+            // The power board drives the editable segments (it computes the setpoint itself); a direct-import
+            // curve (points, no segments) becomes linear ramps so it still ships as segments.
+            var segments = program.Segments is { Count: > 0 }
+                ? program.Segments
+                : LinearSegmentsFromProfile(profile);
+
             // Logical stages for the report's Comparativo do Perfil: one per editable segment when the
             // program defines them (parabola sub-points collapsed to a single leg), otherwise each stored
             // profile vertex after the t=0 baseline.
@@ -54,16 +60,11 @@ public sealed class RunManager(
                 ? ProfileBuilder.StageBoundaries(program.Segments)
                 : [.. profile.Where(p => p.T > 0)];
 
-            var settings = await db.Settings.FirstOrDefaultAsync(s => s.Id == 1, ct);
-            var limits = settings is null
-                ? new ProcessLimits(DomainConstants.ConfigTempMax, DomainConstants.ConfigFanRpmMax, DomainConstants.ConfigVoltageMin, DomainConstants.ConfigVoltageMax, DomainConstants.ConfigExtraTimeMax)
-                : new ProcessLimits(settings.Oven.MaxTemp, settings.Oven.MaxFanRpm, settings.Voltage.Min, settings.Voltage.Max, settings.Process.MaxExtraTimeSec);
-
             // Count the run only AFTER the board accepts it — a board that refuses to start must not inflate
             // RunCount/LastUsed (and the "mais usados" ranking) for an execution that never happened.
             try
             {
-                await board.StartProgramAsync(profile, limits, ct);
+                await board.StartProgramAsync(segments, profile, ct);
             }
             catch (Exception ex)
             {
@@ -313,6 +314,21 @@ public sealed class RunManager(
     /// <summary>A real (non-abort) fault descriptor that turns a finalize into a Falha + linked ErrorLogEntry.
     /// No simulator path produces one today; the RS422 board would supply it when a catalogued fault fires.</summary>
     private sealed record FaultInfo(string Code, ErrorSeverity Severity, string Message, int AtT, int AtTemp);
+
+    /// <summary>Direct-import programs (a curve sent as points, no segments) become linear ramps so the power
+    /// board can drive them as segments: each step (prev→point) is a Linear segment to that temperature.</summary>
+    private static List<ProfileSegment> LinearSegmentsFromProfile(IReadOnlyList<ProfilePoint> profile)
+    {
+        var segs = new List<ProfileSegment>(Math.Max(0, profile.Count - 1));
+        for (var i = 1; i < profile.Count; i++)
+            segs.Add(new ProfileSegment
+            {
+                Temp = (int)Math.Round(profile[i].Temp),
+                DurationSec = (int)Math.Round(profile[i].T - profile[i - 1].T),
+                Ramp = RampShape.Linear,
+            });
+        return segs;
+    }
 
     private static List<ExecProfilePoint> BuildPoints(ActiveRun run)
     {

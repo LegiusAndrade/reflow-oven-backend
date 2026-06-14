@@ -40,13 +40,13 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
         return Task.FromResult(new SensorReadings(board, boardFan, oven, ovenFan, voltage, current));
     }
 
-    public Task StartProgramAsync(IReadOnlyList<ProfilePoint> profile, ProcessLimits limits, CancellationToken ct = default)
+    public Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default)
     {
         lock (_gate)
         {
             _running = true;
             _startedAt = clock.UtcNow;
-            _profile = [.. profile];
+            _profile = [.. profile];  // the sim interpolates the sampled curve; segments are for the real board
         }
         return Task.CompletedTask;
     }

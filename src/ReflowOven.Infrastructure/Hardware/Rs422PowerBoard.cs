@@ -29,7 +29,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
                        CmdSetCalibration = 0x07, CmdSelfTest = 0x08, CmdDriveOutput = 0x09, CmdGetIdentity = 0x0A;
 
     private const int StatusPayloadSize = 35;        // periodic 1 Hz telemetry (SerializeStatus)
-    private const int PowerMaxProfilePoints = 24;    // firmware MODEL_MAX_PROFILE_POINTS — START_PROGRAM cap
+    private const int StartProgramSegsPerChunk = 48; // segments per START_PROGRAM chunk (≤6 B header + 48×5 ≤ 255 B)
 
     private readonly HardwareOptions _opts;
     private readonly IClock _clock;
@@ -116,22 +116,57 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         lock (_stateGate) return Task.FromResult(_last);
     }
 
-    /// <summary>START_PROGRAM: send the reflow profile (downsampled to the firmware's 24-point buffer).
-    /// Process limits/PID reach the board via <see cref="ApplyControlConfigAsync"/> (SettingsService), so this
-    /// sends only START_PROGRAM — re-sending SET_CONFIGURATION here would lack the PID gains and clobber them.</summary>
-    public async Task StartProgramAsync(IReadOnlyList<ProfilePoint> profile, ProcessLimits limits, CancellationToken ct = default)
+    /// <summary>START_PROGRAM: upload the run profile as SEGMENTS and let the power board compute the setpoint
+    /// curve itself (exact parabolas, no pre-sampling). The board holds ≤ <see cref="DomainConstants.ProfileMaxPoints"/>
+    /// segments; larger profiles split into chunks so each frame stays ≤255 B payload. Every chunk is a CRC-checked
+    /// REQUEST (ACK + retry via <see cref="RequestAsync"/>); the last chunk arms the run. <paramref name="profile"/>
+    /// (the pre-sampled curve) is for the simulator and ignored here. Wire per chunk (little-endian):
+    /// total:u8, offset:u8, count:u8, flags:u8 (bit0=first→carries start_temp, bit1=last),
+    /// [start_temp_x10:i16 if first], then count × { shape:u8, duration_s:u16, target_x10:i16 }.
+    /// shape: 0=Linear 1=Fixo 2=Parábola+ 3=Parábola− (firmware applies the same ease). Limits go via
+    /// <see cref="ApplyControlConfigAsync"/>.</summary>
+    public async Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default)
     {
-        var points = Downsample(profile, PowerMaxProfilePoints);
-        var payload = new byte[1 + points.Count * 4];
-        payload[0] = (byte)points.Count;
-        var n = 1;
-        foreach (var p in points)
+        if (segments.Count == 0) throw new InvalidOperationException("RS422: programa sem segmentos.");
+        if (segments.Count > DomainConstants.ProfileMaxPoints)
+            throw new InvalidOperationException($"RS422: programa excede {DomainConstants.ProfileMaxPoints} segmentos.");
+
+        var total = (byte)segments.Count;
+        var startTempX10 = ClampI16(Math.Round(DomainConstants.StartTemp * 10.0));
+
+        for (var offset = 0; offset < segments.Count; offset += StartProgramSegsPerChunk)
         {
-            BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(n), ClampU16(Math.Round(p.T)));      n += 2;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(n), ClampI16(Math.Round(p.Temp)));    n += 2;
+            var count = Math.Min(StartProgramSegsPerChunk, segments.Count - offset);
+            var first = offset == 0;
+            var last = offset + count >= segments.Count;
+
+            var payload = new byte[4 + (first ? 2 : 0) + count * 5];
+            payload[0] = total;
+            payload[1] = (byte)offset;
+            payload[2] = (byte)count;
+            payload[3] = (byte)((first ? 1 : 0) | (last ? 2 : 0));
+            var n = 4;
+            if (first) { BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(n), startTempX10); n += 2; }
+            for (var i = 0; i < count; i++)
+            {
+                var s = segments[offset + i];
+                payload[n++] = ShapeCode(s.Ramp);
+                BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(n), ClampU16(s.DurationSec));            n += 2;
+                BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(n), ClampI16(Math.Round(s.Temp * 10.0))); n += 2;
+            }
+            await RequestAsync(CmdStartProgram, payload, ct); // per-chunk CRC + ACK + retry
         }
-        await RequestAsync(CmdStartProgram, payload, ct);
     }
+
+    /// <summary>Wire shape code for a ramp (explicit so reordering RampShape can't silently shift the wire).</summary>
+    private static byte ShapeCode(RampShape r) => r switch
+    {
+        RampShape.Linear => 0,
+        RampShape.Fixo => 1,
+        RampShape.ParabolaPositiva => 2,
+        RampShape.ParabolaNegativa => 3,
+        _ => 1,
+    };
 
     /// <summary>STOP: abort the run (heater off, fans safe).</summary>
     public Task StopAsync(CancellationToken ct = default) => RequestAsync(CmdStop, [], ct);
@@ -511,15 +546,6 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     // ============================================================================================
     // Small helpers
     // ============================================================================================
-
-    private static List<ProfilePoint> Downsample(IReadOnlyList<ProfilePoint> profile, int max)
-    {
-        if (profile.Count <= max) return [.. profile];
-        var result = new List<ProfilePoint>(max);
-        for (var i = 0; i < max; i++)
-            result.Add(profile[(int)((long)i * (profile.Count - 1) / (max - 1))]); // evenly spaced, keeps first+last
-        return result;
-    }
 
     private static ushort ClampU16(double v) => (ushort)Math.Clamp(v, 0, ushort.MaxValue);
     private static short ClampI16(double v) => (short)Math.Clamp(v, short.MinValue, short.MaxValue);

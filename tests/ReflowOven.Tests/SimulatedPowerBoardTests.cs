@@ -32,7 +32,7 @@ public class SimulatedPowerBoardTests
         var board = new SimulatedPowerBoard(clock);
         List<ProfilePoint> profile = [new() { T = 0, Temp = 25 }, new() { T = 100, Temp = 225 }];
 
-        await board.StartProgramAsync(profile, new ProcessLimits(300, 5000, 100, 250, 60));
+        await board.StartProgramAsync([], profile); // sim ignores segments and interpolates the sampled profile
         clock.UtcNow = DateTimeOffset.UnixEpoch.AddSeconds(50); // setpoint ≈ 125 °C
 
         var r = await board.ReadAsync();
