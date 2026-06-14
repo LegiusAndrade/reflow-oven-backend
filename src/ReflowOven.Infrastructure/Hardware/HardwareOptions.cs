@@ -20,10 +20,9 @@ public sealed class HardwareOptions
     public string PortName { get; set; } = "/dev/ttyAMA0";
 
     /// <summary>Link speed — 8N1 (tem que bater com o firmware). EXIGE o overlay <c>uart0-fixedclk</c>
-    /// (tools/uart0-fixedclk.dts): o PL011 do Pi 4 roda o clock a ~38.4 MHz enquanto o kernel acha 48 MHz, então
-    /// sem o overlay todo baud sai a 0.8× e o link embaralha. Com ele, driver e hardware batem e o baud é real
-    /// (460800 = 38.4 MHz / (16 × 5.2), ~0.1% de erro de divisor — dentro da tolerância da UART).</summary>
-    public int BaudRate { get; set; } = 460800;
+    /// (tools/uart0-fixedclk.dts): sem ele o PL011 do Pi 4 entrega ~0.8× do baud e o link embaralha. Mantido em
+    /// 115200 — 460800/200000 foram testados mas não ficaram confiáveis no link (ver o log "RS422 stats").</summary>
+    public int BaudRate { get; set; } = 115200;
 
     /// <summary>BCM GPIO of the RS422 transceiver's direction/driver-enable pin (RE̅/DE). Held HIGH so the
     /// driver stays enabled for full-duplex RS422 (the board was converted from RS485). -1 disables it (e.g.
