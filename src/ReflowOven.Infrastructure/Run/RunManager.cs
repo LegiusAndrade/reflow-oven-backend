@@ -135,7 +135,10 @@ public sealed class RunManager(
 
             var elapsed = (clock.UtcNow - run.StartedAt).TotalSeconds;
             var reading = await board.ReadAsync(ct);
-            var alvo = ProfileBuilder.TempAt(run.Profile, elapsed);
+            // Prefer the firmware's real setpoint/phase when its controller is driving; fall back to the locally
+            // interpolated curve (the simulator and a not-yet-controlling firmware return null).
+            var runback = await board.GetRunStatusAsync(ct);
+            var alvo = runback?.SetpointC ?? ProfileBuilder.TempAt(run.Profile, elapsed);
 
             // Telemetry is streamed and stored at 2 decimals (Alvo is interpolated, so it would otherwise
             // carry a long tail). The peak trackers below read the raw values before their own rounding.
@@ -148,7 +151,7 @@ public sealed class RunManager(
             run.PeakCurrent = Math.Max(run.PeakCurrent, reading.CurrentA);
             AppendMeasured(run, (int)Math.Round(elapsed), (int)Math.Round(reading.OvenTempC));
 
-            var phase = ProfileBuilder.PhaseAt(run.Profile, elapsed);
+            var phase = runback?.Phase ?? ProfileBuilder.PhaseAt(run.Profile, elapsed);
             if (phase != run.Phase)
             {
                 run.Phase = phase;

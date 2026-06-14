@@ -40,6 +40,9 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
         return Task.FromResult(new SensorReadings(board, boardFan, oven, ovenFan, voltage, current));
     }
 
+    /// <summary>The simulator has no separate controller — the run loop interpolates the profile itself.</summary>
+    public Task<RunReadback?> GetRunStatusAsync(CancellationToken ct = default) => Task.FromResult<RunReadback?>(null);
+
     public Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default)
     {
         lock (_gate)

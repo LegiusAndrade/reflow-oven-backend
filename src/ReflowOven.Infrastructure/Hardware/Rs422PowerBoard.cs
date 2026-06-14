@@ -26,7 +26,8 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     // Command ids (reflow_oven/comms.h) + the OK status; the framing constants/codec live in Rs422Wire.
     private const byte StatusOk = 0x00; // RESPONSE/NACK status: OK=0, UNKNOWN_CMD=1, BAD_PARAM=2, BUSY=3, ERROR=0xFF
     private const byte CmdGetStatus = 0x01, CmdSetConfiguration = 0x02, CmdStartProgram = 0x05, CmdStop = 0x06,
-                       CmdSetCalibration = 0x07, CmdSelfTest = 0x08, CmdDriveOutput = 0x09, CmdGetIdentity = 0x0A;
+                       CmdSetCalibration = 0x07, CmdSelfTest = 0x08, CmdDriveOutput = 0x09, CmdGetIdentity = 0x0A,
+                       CmdGetRunStatus = 0x0B;
 
     private const int StatusPayloadSize = 35;        // periodic 1 Hz telemetry (SerializeStatus)
     private const int StartProgramSegsPerChunk = 48; // segments per START_PROGRAM chunk (≤6 B header + 48×5 ≤ 255 B)
@@ -114,6 +115,23 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     public Task<SensorReadings> ReadAsync(CancellationToken ct = default)
     {
         lock (_stateGate) return Task.FromResult(_last);
+    }
+
+    /// <summary>GET_RUN_STATUS: the firmware's live run state (real setpoint/phase the controller is driving).
+    /// Returns null on a closed/silent link or while the firmware isn't controlling (running=0) — the run loop
+    /// then uses its own interpolated setpoint. Best-effort: a failed poll never breaks a tick.
+    /// Response (LE, ≥9 B): running:u8, phase:u8, setpoint_x10:i16, elapsed_s:u16, total_s:u16, duty:u8.</summary>
+    public async Task<RunReadback?> GetRunStatusAsync(CancellationToken ct = default)
+    {
+        byte[] resp;
+        try { resp = await RequestAsync(CmdGetRunStatus, [], ct); }
+        catch (Exception) when (!ct.IsCancellationRequested) { return null; }
+        if (resp.Length < 9 || resp[0] == 0) return null; // not running / short ⇒ fall back to local interpolation
+        var phase = (RunPhase)Math.Clamp((int)resp[1], 0, 3);
+        var setpoint = BinaryPrimitives.ReadInt16LittleEndian(resp.AsSpan(2)) / 10.0;
+        var elapsed = BinaryPrimitives.ReadUInt16LittleEndian(resp.AsSpan(4));
+        var total = BinaryPrimitives.ReadUInt16LittleEndian(resp.AsSpan(6));
+        return new RunReadback(true, phase, setpoint, elapsed, total, resp[8]);
     }
 
     /// <summary>START_PROGRAM: upload the run profile as SEGMENTS and let the power board compute the setpoint

@@ -12,6 +12,17 @@ public readonly record struct SensorReadings(
     double VoltageV,
     double CurrentA);
 
+/// <summary>The power board's live run state (GET_RUN_STATUS) while its controller is driving the run. The
+/// driver returns null when no controller is driving (the simulator, or firmware reporting running=0); the run
+/// loop then falls back to its own interpolated setpoint/phase. <see cref="DutyPct"/> is the heater duty 0..100.</summary>
+public readonly record struct RunReadback(
+    bool Running,
+    RunPhase Phase,
+    double SetpointC,
+    int ElapsedSec,
+    int TotalSec,
+    int DutyPct);
+
 /// <summary>
 /// A single point on the live execution chart pushed over SignalR. <c>Alvo</c> is the
 /// server-interpolated setpoint; the other seven are measured channels.

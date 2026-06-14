@@ -16,6 +16,10 @@ public interface IPowerBoard
     /// <see cref="ApplyControlConfigAsync"/>, not here.</summary>
     Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default);
 
+    /// <summary>The board's live run state (real setpoint/phase/progress from its controller), or null when no
+    /// controller is driving — the run loop then falls back to its own interpolated setpoint. Polled ~1 Hz.</summary>
+    Task<RunReadback?> GetRunStatusAsync(CancellationToken ct = default);
+
     /// <summary>Stop/abort the current run (heater off, fans to a safe state).</summary>
     Task StopAsync(CancellationToken ct = default);
 
