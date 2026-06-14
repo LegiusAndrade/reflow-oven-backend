@@ -12,9 +12,10 @@ public static class DomainConstants
 
     /// <summary>Max editable points per program: the number of <b>segments</b> in the editor, OR the number of
     /// points on the <b>direct profile import</b> path (<c>req.Profile</c>, a curve sent without segments).
-    /// Both are capped here. This is NOT a cap on the <i>derived</i> sampled curve, which can be larger (a
-    /// parabola segment expands into 12 sub-points) and is bounded only by the segment count.</summary>
-    public const int ProfileMaxPoints = 100;
+    /// Both are capped here. Capped at 50 to fit the power board's run-profile capacity — START_PROGRAM ships the
+    /// segments over RS422 (direct points become linear segments). This is NOT a cap on the <i>derived</i>
+    /// sampled curve, which can be larger (a parabola segment expands into 12 sub-points).</summary>
+    public const int ProfileMaxPoints = 50;
 
     /// <summary>Lowest temperature (°C) a user may enter for a profile point/segment. The fixed t=0
     /// baseline start (<see cref="StartTemp"/>) sits below this floor by design and is exempt from it.</summary>
