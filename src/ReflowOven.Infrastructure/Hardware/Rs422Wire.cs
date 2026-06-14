@@ -119,6 +119,16 @@ internal sealed class Rs422FrameParser
     private int _len;
     private bool _overflow;
 
+    /// <summary>Cumulative frame counters for link-efficiency stats. A delimiter that closes a non-empty
+    /// accumulation bumps <see cref="FramesOk"/> if it decodes to a CRC-valid frame, else <see cref="FramesBad"/>
+    /// (overflow / COBS / version / length / CRC failure). Idle back-to-back delimiters are not counted.</summary>
+    public long FramesOk { get; private set; }
+    public long FramesBad { get; private set; }
+
+    /// <summary>Drop any partial accumulation (call on (re)connect so stale bytes don't corrupt the next frame).
+    /// Keeps the cumulative counters.</summary>
+    public void Reset() { _len = 0; _overflow = false; }
+
     /// <summary>Feed one received byte; returns true (with <paramref name="frame"/> set) when a delimiter
     /// closes a complete, CRC-valid frame.</summary>
     public bool PushByte(byte b, out Rs422Frame frame)
@@ -135,20 +145,22 @@ internal sealed class Rs422FrameParser
         var overflowed = _overflow;
         _len = 0;
         _overflow = false;
-        if (overflowed || n == 0) return false;
+        if (n == 0) return false;                 // idle / back-to-back delimiter — not a frame
+        if (overflowed) { FramesBad++; return false; }
 
         var dec = Rs422Wire.CobsDecode(_accum.AsSpan(0, n), _decoded);
-        if (dec < Rs422Wire.HeaderSize + Rs422Wire.CrcSize) return false;
-        if (_decoded[0] != Rs422Wire.ProtoVersion) return false;
+        if (dec < Rs422Wire.HeaderSize + Rs422Wire.CrcSize) { FramesBad++; return false; }
+        if (_decoded[0] != Rs422Wire.ProtoVersion) { FramesBad++; return false; }
 
         int plen = _decoded[5];
-        if (Rs422Wire.HeaderSize + plen + Rs422Wire.CrcSize != dec) return false;
+        if (Rs422Wire.HeaderSize + plen + Rs422Wire.CrcSize != dec) { FramesBad++; return false; }
 
         var want = BinaryPrimitives.ReadUInt32BigEndian(_decoded.AsSpan(dec - Rs422Wire.CrcSize, Rs422Wire.CrcSize));
-        if (Rs422Wire.Crc32Value(_decoded.AsSpan(0, dec - Rs422Wire.CrcSize)) != want) return false;
+        if (Rs422Wire.Crc32Value(_decoded.AsSpan(0, dec - Rs422Wire.CrcSize)) != want) { FramesBad++; return false; }
 
         frame = new Rs422Frame(_decoded[1], _decoded[2], _decoded[3], _decoded[4],
                                _decoded.AsSpan(Rs422Wire.HeaderSize, plen).ToArray());
+        FramesOk++;
         return true;
     }
 }

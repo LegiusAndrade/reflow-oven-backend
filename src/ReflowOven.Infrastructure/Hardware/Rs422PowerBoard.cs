@@ -49,6 +49,12 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private GpioController? _deGpio;        // holds the RS422 transceiver DE/TX-enable pin HIGH (full-duplex)
     private readonly Task _linkTask;
     private readonly Task _houseTask;
+    private readonly Rs422FrameParser _parser = new();   // persistent so the efficiency counters survive reconnects
+
+    // --- link efficiency stats (Interlocked counters + snapshot for the periodic delta) ------------
+    private long _bytesRx, _bytesTx, _framesTx, _reqTimeouts;
+    private long _snapOk, _snapBad, _snapBytesRx, _snapBytesTx, _snapFramesTx, _snapTimeouts;
+    private DateTimeOffset _statsAt;
 
     // --- cached state (guarded by _stateGate) -------------------------------------------------------
     private SensorReadings _last;          // last decoded status push (zeros until the first one arrives)
@@ -74,6 +80,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         var now = clock.UtcNow;
         _lastRxAt = now;   // grace period before the offline watchdog can trip
         _lastTxAt = now;
+        _statsAt = now;
         AssertTransmitEnable(); // drive the transceiver into transmit mode before the link starts
         _linkTask = Task.Run(() => LinkLoopAsync(_cts.Token));
         _houseTask = Task.Run(() => HousekeepingLoopAsync(_cts.Token));
@@ -247,15 +254,16 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     /// <summary>Drain the serial port and feed every byte to the streaming frame parser until the port drops.</summary>
     private async Task ReceiveLoopAsync(SerialPort port, CancellationToken ct)
     {
-        var parser = new Rs422FrameParser();
+        _parser.Reset(); // drop any partial frame left over from a previous connection
         var buffer = new byte[256];
         var stream = port.BaseStream;
         while (!ct.IsCancellationRequested)
         {
             var read = await stream.ReadAsync(buffer, ct);
             if (read == 0) { await Task.Delay(5, ct); continue; }
+            Interlocked.Add(ref _bytesRx, read);
             for (var i = 0; i < read; i++)
-                if (parser.PushByte(buffer[i], out var frame))
+                if (_parser.PushByte(buffer[i], out var frame))
                     OnFrame(frame);
         }
     }
@@ -301,9 +309,36 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
                 // Offline watchdog: no valid frame for LinkTimeoutMs ⇒ the board is gone.
                 if (open && (now - lastRx).TotalMilliseconds >= _opts.LinkTimeoutMs)
                     RaiseCommsLoss();
+
+                // Periodic link-efficiency report.
+                if (_opts.StatsLogMs > 0 && (now - _statsAt).TotalMilliseconds >= _opts.StatsLogMs)
+                    LogLinkStats(now);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
+    }
+
+    /// <summary>Periodic link-efficiency report over the window since the last call — the control-side
+    /// counterpart of the firmware's RX stats: RX frames ok/bad + error %, RX/TX throughput, request timeouts.</summary>
+    private void LogLinkStats(DateTimeOffset now)
+    {
+        long ok = _parser.FramesOk, bad = _parser.FramesBad;
+        long brx = Interlocked.Read(ref _bytesRx), btx = Interlocked.Read(ref _bytesTx);
+        long ftx = Interlocked.Read(ref _framesTx), to = Interlocked.Read(ref _reqTimeouts);
+
+        var secs = Math.Max(0.001, (now - _statsAt).TotalSeconds);
+        long dOk = ok - _snapOk, dBad = bad - _snapBad, dBrx = brx - _snapBytesRx,
+             dBtx = btx - _snapBytesTx, dFtx = ftx - _snapFramesTx, dTo = to - _snapTimeouts;
+        long rxTotal = dOk + dBad;
+        double errPct = rxTotal > 0 ? 100.0 * dBad / rxTotal : 0;
+
+        _logger.LogInformation(
+            "RS422 stats {Secs:F0}s @ {Baud} baud: RX {Ok} ok/{Bad} bad ({Err:F2}% err, {Rps:F1} fr/s, {Rbps:F0} B/s)"
+            + " | TX {Ftx} fr ({Tbps:F0} B/s) | req timeouts {To}",
+            secs, _opts.BaudRate, dOk, dBad, errPct, dOk / secs, dBrx / secs, dFtx, dBtx / secs, dTo);
+
+        _snapOk = ok; _snapBad = bad; _snapBytesRx = brx; _snapBytesTx = btx;
+        _snapFramesTx = ftx; _snapTimeouts = to; _statsAt = now;
     }
 
     // ============================================================================================
@@ -335,6 +370,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
                 catch (TimeoutException)
                 {
                     _pending.TryRemove(seq, out _);
+                    Interlocked.Increment(ref _reqTimeouts);
                     if (attempt == attempts)
                         throw new TimeoutException(
                             $"RS422: sem resposta ao comando 0x{cmd:X2} após {attempts} tentativas.");
@@ -375,6 +411,8 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
             lock (_stateGate) port = _port;
             if (port is null || !port.IsOpen) throw new InvalidOperationException("RS422: porta fechada.");
             await port.BaseStream.WriteAsync(wire.AsMemory(0, enc), ct);
+            Interlocked.Add(ref _bytesTx, enc);
+            Interlocked.Increment(ref _framesTx);
             lock (_stateGate) _lastTxAt = _clock.UtcNow;
         }
         finally
