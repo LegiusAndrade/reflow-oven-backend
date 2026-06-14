@@ -19,7 +19,10 @@ public sealed class HardwareOptions
     /// <summary>Serial device path of the RS422 transceiver UART.</summary>
     public string PortName { get; set; } = "/dev/ttyAMA0";
 
-    /// <summary>Link speed — the protocol runs at 115200 8N1 (must match the firmware).</summary>
+    /// <summary>Link speed — 115200 8N1 (tem que bater com o firmware). O PL011 do Pi 4 nesta placa rodava o
+    /// clock a ~38.4 MHz enquanto o kernel achava 48 MHz (todo baud saía a 0.8×); corrigido no BOOT pelo overlay
+    /// de device-tree <c>uart0-fixedclk</c> (tools/uart0-fixedclk.dts) que declara o clock real → 115200 no fio é
+    /// real. Sem o overlay, o link sai a 0.8× e embaralha. Validado: pyserial e .NET TX==RX a 115200.</summary>
     public int BaudRate { get; set; } = 115200;
 
     /// <summary>BCM GPIO of the RS422 transceiver's direction/driver-enable pin (RE̅/DE). Held HIGH so the

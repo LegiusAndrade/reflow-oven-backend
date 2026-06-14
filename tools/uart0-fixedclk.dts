@@ -1,0 +1,38 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * uart0-fixedclk — corrige o baud do PL011 (ttyAMA0) no Pi 4.
+ *
+ * Nesta placa o cprman gera o clock do UART0 a ~38.4 MHz (0.8x do que reporta), mas o kernel
+ * acha que e 48 MHz -> todo baud sai a 0.8x (pede 115200, sai ~92160). dtparam=uart0_clkrate
+ * NAO resolve: ele reprograma o cprman (que re-aplica o 0.8x). Este overlay usa um fixed-clock
+ * (puro numero, nao mexe no hardware) declarando o clock REAL de 38.4 MHz como o uartclk do
+ * PL011 -> o divisor que o driver calcula passa a bater com o hardware -> 115200 sai certo.
+ * Mesmo mecanismo do overlay oficial midi-uart0.
+ *
+ * IMPORTANTE: remova qualquer linha dtparam=uart0_clkrate=... do config.txt antes de usar.
+ */
+
+/ {
+    compatible = "brcm,bcm2711";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            uart0_fixedclk: uart0_fixedclk {
+                compatible = "fixed-clock";
+                #clock-cells = <0>;
+                clock-frequency = <38400000>;   /* clock REAL do PL011 nesta placa */
+            };
+        };
+    };
+
+    fragment@1 {
+        target = <&uart0>;
+        __overlay__ {
+            clocks = <&uart0_fixedclk>, <&clocks 5>;   /* uartclk = fixed 38.4M ; apb_pclk = VPU(5) */
+            clock-names = "uartclk", "apb_pclk";
+        };
+    };
+};
