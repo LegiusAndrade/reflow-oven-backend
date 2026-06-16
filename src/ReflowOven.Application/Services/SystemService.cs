@@ -95,7 +95,7 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
             Total = g.Count(),
             Active = g.Count(x => x.Status == UserStatus.Ativo),
             Admins = g.Count(x => x.Type == UserType.Admin),
-        }).FirstOrDefaultAsync(ct);
+        }).SingleOrDefaultAsync(ct);
         var usersTotal = u?.Total ?? 0;
         var usersActive = u?.Active ?? 0;
         var admins = u?.Admins ?? 0;
@@ -106,7 +106,7 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
             Total = g.Count(),
             Deleted = g.Count(x => x.IsDeleted),
             Seed = g.Count(x => x.IsSeed && !x.IsDeleted),
-        }).FirstOrDefaultAsync(ct);
+        }).SingleOrDefaultAsync(ct);
         var programsTotal = p?.Total ?? 0;
         var programsDeleted = p?.Deleted ?? 0;
         var programsSeed = p?.Seed ?? 0;
@@ -119,7 +119,7 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
             Total = g.Count(),
             Concluido = g.Count(x => x.Status == ExecutionStatus.Concluido),
             Falha = g.Count(x => x.Status == ExecutionStatus.Falha),
-        }).FirstOrDefaultAsync(ct);
+        }).SingleOrDefaultAsync(ct);
         var execTotal = ex?.Total ?? 0;
         var execConcluido = ex?.Concluido ?? 0;
         var execFalha = ex?.Falha ?? 0;
@@ -131,7 +131,7 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
             Critico = g.Count(x => x.Severity == ErrorSeverity.Critico),
             Alerta = g.Count(x => x.Severity == ErrorSeverity.Alerta),
             Aviso = g.Count(x => x.Severity == ErrorSeverity.Aviso),
-        }).FirstOrDefaultAsync(ct);
+        }).SingleOrDefaultAsync(ct);
         var errTotal = er?.Total ?? 0;
         var errCritico = er?.Critico ?? 0;
         var errAlerta = er?.Alerta ?? 0;
@@ -143,7 +143,7 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
         {
             Total = g.Count(),
             Unread = g.Count(x => !x.Read),
-        }).FirstOrDefaultAsync(ct);
+        }).SingleOrDefaultAsync(ct);
         var notifTotal = nt?.Total ?? 0;
         var notifUnread = nt?.Unread ?? 0;
 
@@ -153,7 +153,7 @@ public sealed class SystemService(ISystemController system, IAppDbContext db)
             Info = g.Count(x => x.Level == LogLevel.Info),
             Aviso = g.Count(x => x.Level == LogLevel.Aviso),
             Erro = g.Count(x => x.Level == LogLevel.Erro),
-        }).FirstOrDefaultAsync(ct);
+        }).SingleOrDefaultAsync(ct);
         var logInfo = lg?.Info ?? 0;
         var logAviso = lg?.Aviso ?? 0;
         var logErro = lg?.Erro ?? 0;
