@@ -192,6 +192,27 @@ builder.Services.AddOpenApi(options =>
 
 var app = builder.Build();
 
+// Friendly fast-fail BEFORE migrate/seed: if the HTTP port is already taken, say it in one line and exit so a
+// doomed second instance neither runs the DB work nor lets Kestrel dump a socket/Kestrel bind stack trace. The
+// try/catch around app.Run stays as the backstop for the rare bind race and any other startup error.
+foreach (var rawUrl in (Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? builder.Configuration["urls"] ?? "")
+             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    if (Uri.TryCreate(rawUrl, UriKind.Absolute, out var probeUri) && probeUri.Port > 0)
+    {
+        try
+        {
+            var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, probeUri.Port);
+            probe.Start();
+            probe.Stop();
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            Log.Fatal("A API não subiu: a porta {Port} já está em uso — outra instância já está rodando? "
+                + "Pare a anterior (no container: pkill -f ReflowOven.Api) e suba de novo.", probeUri.Port);
+            return;
+        }
+    }
+
 // --- Migrate + seed on startup ----------------------------------------------------------
 using (var scope = app.Services.CreateScope())
 {
@@ -271,7 +292,20 @@ app.Run();
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "A API encerrou inesperadamente durante a inicialização.");
+    // A port-already-in-use bind failure is the usual "started a second instance" slip — show a clean,
+    // actionable line instead of a Kestrel/socket stack trace. Anything else keeps the full detail.
+    var addressInUse = false;
+    for (Exception? e = ex; e is not null; e = e.InnerException)
+        if (e is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.AddressAlreadyInUse })
+        {
+            addressInUse = true;
+            break;
+        }
+    if (addressInUse)
+        Log.Fatal("A API não subiu: o endereço HTTP já está em uso — outra instância já está rodando? "
+            + "Pare a anterior (no container: pkill -f ReflowOven.Api) e suba de novo.");
+    else
+        Log.Fatal(ex, "A API encerrou inesperadamente durante a inicialização.");
 }
 finally
 {

@@ -289,8 +289,25 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
             catch (Exception ex)
             {
                 if (ct.IsCancellationRequested) break; // shutdown closed the port — not a real link failure
-                _logger.LogWarning(ex, "RS422: falha na porta {Port}; reconectando em {Delay} ms.",
-                    _opts.PortName, _opts.ReconnectDelayMs);
+                // Expected operational failures (busy / denied / missing port) get a clean one-liner + hint,
+                // not a stack trace — the loop just retries. Anything unexpected keeps the full exception.
+                var busy = ex is UnauthorizedAccessException
+                    && (ex.InnerException?.Message.Contains("busy", StringComparison.OrdinalIgnoreCase) ?? false);
+                string? detalhe = ex switch
+                {
+                    UnauthorizedAccessException when busy =>
+                        $"porta {_opts.PortName} ocupada — outra instância da API já está usando a serial?",
+                    UnauthorizedAccessException =>
+                        $"sem permissão para abrir {_opts.PortName} (sem acesso ao dispositivo — grupo dialout/privilégios)",
+                    FileNotFoundException =>
+                        $"porta {_opts.PortName} não encontrada — confira Hardware:PortName e se o dispositivo existe",
+                    _ => null,
+                };
+                if (detalhe is not null)
+                    _logger.LogWarning("RS422: {Detalhe}. Reconectando em {Delay} ms.", detalhe, _opts.ReconnectDelayMs);
+                else
+                    _logger.LogWarning(ex, "RS422: falha na porta {Port}; reconectando em {Delay} ms.",
+                        _opts.PortName, _opts.ReconnectDelayMs);
                 RaiseCommsLoss();
             }
             finally
