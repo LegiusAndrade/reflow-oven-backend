@@ -133,6 +133,20 @@ public sealed class RunManager(
         {
             if (_active is not { Status: RunStatus.Running } run) return;
 
+            // A board reset / RS422 drop mid-run breaks the process: the firmware loses the loaded program and
+            // the heater goes uncontrolled, so don't keep interpolating a phantom run — finalize it as a
+            // comms-loss fault (E-130). IsConnected is debounced by the board's LinkTimeoutMs watchdog, so a
+            // single dropped frame won't trip it; only a real ≥LinkTimeoutMs silence (a reset) does.
+            if (!board.IsConnected)
+            {
+                logger.LogWarning("Execução '{Program}' (run {RunId}) abortada: link RS422 perdido (E-130).",
+                    run.ProgramName, run.RunId);
+                await FinalizeAsync(run, RunStatus.Aborted, new FaultInfo(
+                    "E-130", ErrorSeverity.Alerta, "Perda de comunicação RS422 com a placa de potência durante a execução.",
+                    (int)Math.Round((clock.UtcNow - run.StartedAt).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
+                return;
+            }
+
             var elapsed = (clock.UtcNow - run.StartedAt).TotalSeconds;
             var reading = await board.ReadAsync(ct);
             // Prefer the firmware's real setpoint/phase when its controller is driving; fall back to the locally
@@ -170,23 +184,25 @@ public sealed class RunManager(
 
     private async Task FinalizeAsync(ActiveRun run, RunStatus status, FaultInfo? fault, CancellationToken ct)
     {
-        await board.StopAsync(ct);
+        // Best-effort: a finalize triggered BY a dead/offline board (the comms-loss fault) must still persist
+        // the report — don't let an unanswered STOP throw and leave the run un-finalized (it would retry forever).
+        try { await board.StopAsync(ct); }
+        catch (Exception ex) { logger.LogWarning(ex, "Falha ao enviar STOP à placa ao finalizar (segue a finalização)."); }
         run.Status = status;
         var endedAt = clock.UtcNow;
         var duration = (int)Math.Round((endedAt - run.StartedAt).TotalSeconds);
 
-        var execStatus = status switch
-        {
-            RunStatus.Done => ExecutionStatus.Concluido,
-            RunStatus.Aborted => ExecutionStatus.Abortado,
-            _ => ExecutionStatus.Falha,
-        };
-        var closingMessage = status switch
-        {
-            RunStatus.Done => "Execução concluída",
-            RunStatus.Aborted => "Execução abortada",
-            _ => "Execução com falha",
-        };
+        // A finalize carries a live wire status (done/aborted — the only RunStatus values) plus an optional
+        // catalogued fault. A fault makes the persisted execution a Falha regardless of the wire status: a
+        // comms-loss/over-temp abort is published live as "aborted" (the frontend has no "failed" state) yet
+        // recorded as a Falha with its E-code in Relatórios/Notificações.
+        var failed = fault is not null;
+        var execStatus = failed ? ExecutionStatus.Falha
+            : status == RunStatus.Done ? ExecutionStatus.Concluido
+            : ExecutionStatus.Abortado;
+        var closingMessage = failed ? "Execução com falha"
+            : status == RunStatus.Done ? "Execução concluída"
+            : "Execução abortada";
 
         var report = new ExecutionReport
         {
@@ -225,12 +241,9 @@ public sealed class RunManager(
 
         // One system-log line per finalize (Log do Sistema): Concluída→Info, Abortada→Aviso, Falha→Erro.
         // Fully-qualified: this file imports Microsoft.Extensions.Logging, whose LogLevel would collide.
-        var logLevel = status switch
-        {
-            RunStatus.Done => ReflowOven.Domain.Enums.LogLevel.Info,
-            RunStatus.Aborted => ReflowOven.Domain.Enums.LogLevel.Aviso,
-            _ => ReflowOven.Domain.Enums.LogLevel.Erro,
-        };
+        var logLevel = failed ? ReflowOven.Domain.Enums.LogLevel.Erro
+            : status == RunStatus.Done ? ReflowOven.Domain.Enums.LogLevel.Info
+            : ReflowOven.Domain.Enums.LogLevel.Aviso;
         var logEntry = new SystemLogEntry
         {
             At = endedAt,
@@ -279,19 +292,13 @@ public sealed class RunManager(
                 Id = Guid.NewGuid(),
                 At = endedAt,
                 // Concluída → info, abortada → warning (âmbar no front), falha → error.
-                Kind = status switch
-                {
-                    RunStatus.Done => NotificationFeedKind.Info,
-                    RunStatus.Aborted => NotificationFeedKind.Warning,
-                    _ => NotificationFeedKind.Error,
-                },
+                Kind = failed ? NotificationFeedKind.Error
+                    : status == RunStatus.Done ? NotificationFeedKind.Info
+                    : NotificationFeedKind.Warning,
                 Title = closingMessage,
-                Message = status switch
-                {
-                    RunStatus.Done => $"'{run.ProgramName}' concluída em {duration}s (pico {report.PeakTemp} °C).",
-                    RunStatus.Aborted => $"'{run.ProgramName}' foi abortada após {duration}s.",
-                    _ => $"'{run.ProgramName}' falhou após {duration}s ({fault?.Code ?? "sem código"}).",
-                },
+                Message = failed ? $"'{run.ProgramName}' falhou após {duration}s ({fault?.Code ?? "sem código"})."
+                    : status == RunStatus.Done ? $"'{run.ProgramName}' concluída em {duration}s (pico {report.PeakTemp} °C)."
+                    : $"'{run.ProgramName}' foi abortada após {duration}s.",
             };
             db.Notifications.Add(notification);
             audit.Record(OperationType.Execucao, OperationObject.Execucao, run.RunId.ToString(),
