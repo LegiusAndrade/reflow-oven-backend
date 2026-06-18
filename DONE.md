@@ -3,6 +3,27 @@
 Tarefas **em aberto** estão em `TODO.md`. As seções abaixo são todas **concluídas** — alguns
 cabeçalhos históricos dizem "Pendentes", mas cada item traz a nota ✅/"Feito:" do que foi entregue.
 
+## Autotune do PID (relé) + config pull da placa (2026-06-17)
+
+- ✅ **#7 (firmware) — AUTOTUNE (RS422 0x0D).** Auto-tune por relé Åström-Hägglund exposto fim-a-fim:
+  `IPowerBoard.AutoTuneAsync(op, target)` (START/CANCEL/QUERY + parse da RESPONSE de 22 B
+  `state/cycles/ku/tu_ms/kp/ki/kd`); `AutotuneManager` (singleton, espelha o `RunManager`) inicia, faz poll a
+  1 Hz pelo `AutotuneLoopService` e finaliza, com abort por E-130 e guarda de tempo máximo (1800 s).
+- ✅ **#7 (firmware) — GET_CONFIGURATION (RS422 0x0E).** O `Rs422PowerBoard` agora trata o **REQUEST que a
+  power inicia no boot** (evento `ConfigRequested`); o `AutotuneLoopService` responde empurrando a Config (24 B).
+  Sem isso a placa fica em estado seguro e não aquece.
+- ✅ **Histórico persistido (`AutotuneRun` + migration `AddAutotuneRuns`).** Início/fim, duração, status
+  (Executando/Concluído/Falha/Cancelado), alvo, ciclos, Ku/Tu + Kp/Ki/Kd, ganhos **anteriores** (antes→depois),
+  aplicado?, motivo do erro (inferido — a RESPONSE não traz código) e o `FaultCode` (E-1xx) presente na falha,
+  e quem disparou.
+- ✅ **API:** `GET /api/autotune/status` · `GET /history` (paginado, `Total` = "quantas vezes") · `POST /start`
+  · `POST /cancel` · `POST /{id}/apply` · `POST /{id}/dismiss`. Disparar/cancelar/aplicar é **CalibrationOnly**;
+  ler é autenticado. **Ganhos não são aplicados sozinhos** — aplicar com confirmação na tela (decidido com o
+  Lucas, 2026-06-17): o `apply` grava em Settings + empurra a config.
+- ✅ Simulador faz um tune plausível (~12 s) pro fluxo de dev rodar sem hardware. Build + 58 testes verdes.
+
+**Pendente (front):** a **tela de Autotune** (registrada no `../reflow-oven-front/TODO.md`).
+
 ## RS422 / hardware real + acabamentos (2026-06-15 → 06-17)
 
 - ✅ **#7 — RS422 / power board real (`Rs422PowerBoard`).** Fala o wire format completo: COBS + CRC-32 (poly

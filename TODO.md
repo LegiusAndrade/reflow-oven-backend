@@ -12,6 +12,9 @@ O histórico completo do que já foi entregue está em **`DONE.md`**. Tarefas do
   reproduzida): os ~14 `ExecuteDeleteAsync` rodam em sequência sem transação — candidato a envolver numa
   transação e checar. Investigação adiada.
 
+- **Autotune: tela do front.** O backend está pronto (`/api/autotune/*` — histórico paginado + start/cancel/
+  apply/dismiss, CalibrationOnly pra disparar); falta a **tela dedicada** (disparar/cancelar com alvo, progresso
+  ao vivo, histórico, aplicar-com-confirmação). Registrada em `../reflow-oven-front/TODO.md`. *(time do front)*
 - **#9 — Log de Operação: tela do front.** O backend está pronto e Master-only; falta o front montar o
   visualizador contra o contrato (`GET /api/operation-log`). *(time do front)*
 
