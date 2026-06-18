@@ -3,6 +3,34 @@
 Tarefas **em aberto** estão em `TODO.md`. As seções abaixo são todas **concluídas** — alguns
 cabeçalhos históricos dizem "Pendentes", mas cada item traz a nota ✅/"Feito:" do que foi entregue.
 
+## RS422 / hardware real + acabamentos (2026-06-15 → 06-17)
+
+- ✅ **#7 — RS422 / power board real (`Rs422PowerBoard`).** Fala o wire format completo: COBS + CRC-32 (poly
+  `0xEDB88320`, trailer big-endian), peer-to-peer com o **NOTIFY de 1 Hz cacheado** (`ReadAsync` devolve o
+  último push, sem round-trip) e **keep-alive ≥1 frame/s** pro watchdog da power. Comandos: `GET_STATUS`,
+  `SET_CONFIGURATION`, `GET_IDENTITY`, `GET_RUN_STATUS` (telemetria de run ao vivo), `GET_COMMS_STATS`,
+  `START_PROGRAM` (perfil → segmentos, **chunked** a 48 seg/chunk), `STOP`. 115200 8N1 (PL011 do Pi 4 roda a
+  0.8× → `BaudRate=144000` no device). Seleção por `Hardware:Mode=Rs422`.
+- ✅ **#7 — `LinuxSystemController`.** Implementado (nmcli/timedatectl/systemctl + `/proc`/`/sys`),
+  selecionável por `System:Mode=Linux` (o default segue `SimulatedSystemController`).
+- ✅ **Abort no link loss (E-130).** O run aborta sozinho se o link RS422 cair no meio (`RunManager` checa
+  `IsConnected`/`FaultRaised`; finalize fault-aware → "Falha"; STOP best-effort). Acaba com a execução-fantasma
+  que sobrevivia a resets da placa.
+- ✅ **Perfil cap 100 → 50** pontos/segmentos (`DomainConstants`, commit `207f90f`) — na run o perfil sobe pra
+  power como segmentos via RS422.
+- ✅ **#3 — Notificações faltantes.** Falha de placa (E-1xx) → `Error` no finalize do run (`RunManager`); **OTA
+  disponível** → `Update` e servidor central up/down → `Info`/`Error` (`SystemMonitorService`).
+- ✅ **🔒 Lockout: tempo restante.** `LoginResult.RetryAfterSeconds` + header `Retry-After` + `retryAfterSeconds`
+  no corpo da resposta throttled — o front mostra o countdown ("tente em Xs") no lugar da mensagem vaga.
+- ✅ **Erros de startup amigáveis.** Porta `:5248` ocupada e serial ocupada/sem-permissão/inexistente agora
+  logam uma linha clara (sem stack trace); um pre-check derruba a instância condenada antes do migrate/seed.
+- ✅ **Helpers RS422 + faxina.** `tools/dump-program.py` / `run-program.py` / `seed-test-programs.py` na Pi;
+  agregados de auditoria de 1 linha agora com `SingleOrDefaultAsync` (matam os warnings
+  `FirstWithoutOrderByAndFilter`).
+
+**Pendente (fora do backend):** validação no hardware real e o controlador **PID/reflow da power** (lado do
+firmware, `../reflow-oven-firmware`).
+
 ## Permissões & dev Master (2026-06-04)
 
 - ✅ **#5 — Limpeza de banco: categorias + permissões.** Overview devolve `programas`/`usuarios` (exceto o
