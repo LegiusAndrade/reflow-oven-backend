@@ -31,6 +31,7 @@ public interface IAppDbContext
     DbSet<Calibration> Calibrations { get; }
     DbSet<DeviceInfo> DeviceInfo { get; }
     DbSet<Board> Boards { get; }
+    DbSet<AutotuneRun> AutotuneRuns { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 

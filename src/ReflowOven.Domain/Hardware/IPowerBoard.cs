@@ -45,4 +45,14 @@ public interface IPowerBoard
     /// control board's STATUS LED uses this; the power board's OWN faults (over-temp, over-current, …) show
     /// on its own LED and reach the operator via the UI — they are not mirrored on the control board.</summary>
     bool IsConnected { get; }
+
+    /// <summary>AUTOTUNE (0x0D): start/cancel/poll the firmware relay PID auto-tune. <paramref name="targetC"/>
+    /// is the oscillation setpoint (°C), required for <see cref="AutoTuneOp.Start"/> and ignored otherwise.
+    /// Returns the board current tune state and, once done, the identified gains.</summary>
+    Task<AutoTuneReadback> AutoTuneAsync(AutoTuneOp op, double? targetC = null, CancellationToken ct = default);
+
+    /// <summary>Raised when the power board asks the host for its control configuration (GET_CONFIGURATION,
+    /// 0x0E): it does this on boot and retries until answered, staying in a safe (non-heating) state until it
+    /// gets one. The handler should push the current config via <see cref="ApplyControlConfigAsync"/>.</summary>
+    event EventHandler? ConfigRequested;
 }

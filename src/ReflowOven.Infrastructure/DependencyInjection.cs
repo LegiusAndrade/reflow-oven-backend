@@ -76,6 +76,9 @@ public static class DependencyInjection
         services.AddSingleton<IRunManager, RunManager>();
         services.AddHostedService<RunControlLoopService>();
 
+        services.AddSingleton<IAutotuneManager, AutotuneManager>();
+        services.AddHostedService<AutotuneLoopService>();
+
         // OrangePi OS controller: real nmcli/systemctl on the Pi (System:Mode=Linux), else a simulator.
         // The Linux controller uses IHttpClientFactory for the central-server/OTA HTTP probes.
         services.Configure<SystemOptions>(config.GetSection(SystemOptions.Section));

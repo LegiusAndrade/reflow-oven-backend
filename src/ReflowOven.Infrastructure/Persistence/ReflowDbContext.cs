@@ -31,6 +31,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
     public DbSet<Calibration> Calibrations => Set<Calibration>();
     public DbSet<DeviceInfo> DeviceInfo => Set<DeviceInfo>();
     public DbSet<Board> Boards => Set<Board>();
+    public DbSet<AutotuneRun> AutotuneRuns => Set<AutotuneRun>();
 
     public DbSet<OperationLogEntry> OperationLog => Set<OperationLogEntry>();
 
@@ -242,6 +243,15 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(x => x.Role).ValueGeneratedNever();
             e.Property(x => x.Version).HasMaxLength(40);
             e.Property(x => x.Serial).HasMaxLength(40);
+        });
+
+        b.Entity<AutotuneRun>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.UserName).HasMaxLength(40);
+            e.Property(x => x.ErrorReason).HasMaxLength(200);
+            e.Property(x => x.FaultCode).HasMaxLength(10);
+            e.HasIndex(x => x.StartedAt);
         });
 
         // Store every (non-JSON) enum column as its pt-BR wire text.

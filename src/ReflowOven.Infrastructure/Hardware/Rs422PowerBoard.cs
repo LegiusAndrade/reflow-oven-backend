@@ -27,7 +27,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private const byte StatusOk = 0x00; // RESPONSE/NACK status: OK=0, UNKNOWN_CMD=1, BAD_PARAM=2, BUSY=3, ERROR=0xFF
     private const byte CmdGetStatus = 0x01, CmdSetConfiguration = 0x02, CmdStartProgram = 0x05, CmdStop = 0x06,
                        CmdSetCalibration = 0x07, CmdSelfTest = 0x08, CmdDriveOutput = 0x09, CmdGetIdentity = 0x0A,
-                       CmdGetRunStatus = 0x0B;
+                       CmdGetRunStatus = 0x0B, CmdAutoTune = 0x0D, CmdGetConfiguration = 0x0E;
 
     private const int StatusPayloadSize = 35;        // periodic 1 Hz telemetry (SerializeStatus)
     private const int StartProgramSegsPerChunk = 48; // segments per START_PROGRAM chunk (≤6 B header + 48×5 ≤ 255 B)
@@ -65,6 +65,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private bool _offline;                 // currently-signalled comms-loss (edge-triggered)
 
     public event EventHandler<FaultRaised>? FaultRaised;
+    public event EventHandler? ConfigRequested;
 
     /// <summary>True while the RS422 link is alive (a recent status frame). See <see cref="IPowerBoard.IsConnected"/>.</summary>
     public bool IsConnected
@@ -133,6 +134,33 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         var total = BinaryPrimitives.ReadUInt16LittleEndian(resp.AsSpan(6));
         return new RunReadback(true, phase, setpoint, elapsed, total, resp[8]);
     }
+
+    /// <summary>AUTOTUNE (0x0D): start/cancel/poll the firmware relay PID auto-tune. START carries the
+    /// oscillation setpoint (target_x10:i16); CANCEL/QUERY carry only the op. Reply (22 B LE):
+    /// state:u8, cycles:u8, ku:f32, tu_ms:u32, kp:f32, ki:f32, kd:f32. A NACK (run/tune active, or no config
+    /// yet) surfaces as the usual RequestAsync rejection.</summary>
+    public async Task<AutoTuneReadback> AutoTuneAsync(AutoTuneOp op, double? targetC = null, CancellationToken ct = default)
+    {
+        byte[] req;
+        if (op == AutoTuneOp.Start)
+        {
+            req = new byte[3];
+            req[0] = (byte)op;
+            BinaryPrimitives.WriteInt16LittleEndian(req.AsSpan(1), ClampI16(Math.Round((targetC ?? 0) * 10.0)));
+        }
+        else req = [(byte)op];
+
+        var resp = await RequestAsync(CmdAutoTune, req, ct);
+        if (resp.Length < 22) return new AutoTuneReadback(AutoTuneState.Idle, 0, 0, 0, 0, 0, 0);
+        var state = (AutoTuneState)Math.Clamp((int)resp[0], 0, 3);
+        var ku = BinaryPrimitives.ReadSingleLittleEndian(resp.AsSpan(2));
+        var tuMs = BinaryPrimitives.ReadUInt32LittleEndian(resp.AsSpan(6));
+        var kp = BinaryPrimitives.ReadSingleLittleEndian(resp.AsSpan(10));
+        var ki = BinaryPrimitives.ReadSingleLittleEndian(resp.AsSpan(14));
+        var kd = BinaryPrimitives.ReadSingleLittleEndian(resp.AsSpan(18));
+        return new AutoTuneReadback(state, resp[1], ku, (int)Math.Min(tuMs, int.MaxValue), kp, ki, kd);
+    }
+
 
     /// <summary>START_PROGRAM: upload the run profile as SEGMENTS and let the power board compute the setpoint
     /// curve itself (exact parabolas, no pre-sampling). The board holds ≤ <see cref="DomainConstants.ProfileMaxPoints"/>
@@ -355,7 +383,12 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
                 if (_pending.TryRemove(frame.Seq, out var tcs))
                     tcs.TrySetResult(new RxResponse(frame.Type == Rs422Wire.TypeResponse, frame.Status, frame.Payload));
                 break;
-            // The power board never issues REQUESTs to us; any other NOTIFY is just keep-alive traffic.
+            case Rs422Wire.TypeRequest when frame.Cmd == CmdGetConfiguration:
+                // The power pulls its control config on boot (GET_CONFIGURATION) and retries until
+                // answered; AutotuneLoopService responds by pushing SET_CONFIGURATION. Until then it
+                // will not heat. Any other REQUEST/NOTIFY is just keep-alive traffic.
+                ConfigRequested?.Invoke(this, EventArgs.Empty);
+                break;
         }
     }
 

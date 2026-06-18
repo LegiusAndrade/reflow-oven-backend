@@ -61,3 +61,21 @@ public readonly record struct BoardIdentity(
     string ControlVersion,
     string ControlSerial,
     int ControlHours);
+
+/// <summary>Op for the AUTOTUNE command (0x0D): start the relay tune, cancel it, or poll its state.</summary>
+public enum AutoTuneOp { Start = 0, Cancel = 1, Query = 2 }
+
+/// <summary>Raw state of the firmware relay auto-tuner (AUTOTUNE_RELAY_STATE_t on the wire).</summary>
+public enum AutoTuneState { Idle = 0, Running = 1, Done = 2, Failed = 3 }
+
+/// <summary>One reply to an AUTOTUNE command (0x0D, 22 B): engine state + cycle progress and, once
+/// <see cref="AutoTuneState.Done"/>, the identified ultimate gain/period plus the derived PID gains.
+/// Ku is in V/°C; Tu in milliseconds; the gains are in the controller units (volts).</summary>
+public readonly record struct AutoTuneReadback(
+    AutoTuneState State,
+    int Cycles,
+    double Ku,
+    int TuMs,
+    double Kp,
+    double Ki,
+    double Kd);

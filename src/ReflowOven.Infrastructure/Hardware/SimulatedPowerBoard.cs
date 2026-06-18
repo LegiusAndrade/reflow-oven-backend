@@ -12,9 +12,12 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
     private bool _running;
     private DateTimeOffset _startedAt;
     private List<ProfilePoint> _profile = [];
+    private AutoTuneState _tuneState;
+    private DateTimeOffset _tuneStartedAt;
 
 #pragma warning disable CS0067 // The simulator stays on the happy path; faults come from the real board.
     public event EventHandler<FaultRaised>? FaultRaised;
+    public event EventHandler? ConfigRequested; // a simulated board has nothing to pull — never raised
 #pragma warning restore CS0067
 
     /// <summary>The simulated link is always up.</summary>
@@ -63,6 +66,26 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
     public Task ApplyCalibrationAsync(Calibration calibration, CancellationToken ct = default) => Task.CompletedTask;
 
     public Task ApplyControlConfigAsync(Settings settings, CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<AutoTuneReadback> AutoTuneAsync(AutoTuneOp op, double? targetC = null, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (op == AutoTuneOp.Start) { _tuneState = AutoTuneState.Running; _tuneStartedAt = clock.UtcNow; }
+            else if (op == AutoTuneOp.Cancel && _tuneState == AutoTuneState.Running) _tuneState = AutoTuneState.Failed;
+
+            if (_tuneState == AutoTuneState.Running)
+            {
+                var elapsed = (clock.UtcNow - _tuneStartedAt).TotalSeconds;
+                if (elapsed >= 12) _tuneState = AutoTuneState.Done; // the sim "converges" after ~12 s
+                else return Task.FromResult(new AutoTuneReadback(AutoTuneState.Running, (int)Math.Min(8, elapsed / 1.5), 0, 0, 0, 0, 0));
+            }
+            // Plausible Tyreus-Luyben result (Ku 2 V/°C, Tu 60 s) so the dev flow shows real gains.
+            return Task.FromResult(_tuneState == AutoTuneState.Done
+                ? new AutoTuneReadback(AutoTuneState.Done, 8, 2.0, 60000, 0.625, 0.0047, 5.95)
+                : new AutoTuneReadback(_tuneState, 0, 0, 0, 0, 0, 0));
+        }
+    }
 
     public Task<SelfTestResult> RunSelfTestAsync(SelfTestId id, CancellationToken ct = default) =>
         Task.FromResult(new SelfTestResult(id, Random.Shared.NextDouble() < 0.88 ? SelfTestState.Ok : SelfTestState.Fail));

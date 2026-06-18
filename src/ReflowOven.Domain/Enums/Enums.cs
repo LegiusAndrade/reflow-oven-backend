@@ -229,3 +229,13 @@ public enum BoardRole
     [JsonStringEnumMemberName("power")] Power,
     [JsonStringEnumMemberName("control")] Control,
 }
+
+/// <summary>Lifecycle of a PID relay auto-tune run (persisted + wire). Maps the firmware
+/// AUTOTUNE_RELAY_STATE_t (idle/running/done/failed) onto the user-facing outcome set.</summary>
+public enum AutotuneStatus
+{
+    Executando,
+    [JsonStringEnumMemberName("Concluído")] Concluido,
+    Falha,
+    Cancelado,
+}
