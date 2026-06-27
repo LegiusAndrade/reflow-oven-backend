@@ -23,6 +23,13 @@ public interface IPowerBoard
     /// <summary>Stop/abort the current run (heater off, fans to a safe state).</summary>
     Task StopAsync(CancellationToken ct = default);
 
+    /// <summary>ACK_FAULT (0x0F): acknowledge the board's latched protection fault and ask it to release the
+    /// FAULT latch. REQUEST with no payload; the board replies OK and clears the latch once no critical
+    /// condition remains (acknowledging a still-active fault is safe — the board stays latched and applies the
+    /// acknowledgement when the cause clears). The cleared state is observed on the next periodic status push.
+    /// On the simulator this simply clears the simulated fault back to OK.</summary>
+    Task AcknowledgeFaultAsync(CancellationToken ct = default);
+
     /// <summary>Push sensor calibration (offsets/gain/fan PWM) to the board.</summary>
     Task ApplyCalibrationAsync(Calibration calibration, CancellationToken ct = default);
 

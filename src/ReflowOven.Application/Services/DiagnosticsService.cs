@@ -3,7 +3,7 @@ using System.Net.NetworkInformation;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Diagnóstico backend: statistics & rankings, live sensor readings, self-tests and network ping.</summary>
-public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board)
+public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board, AuditService audit)
 {
     public async Task<DiagnosticsOverviewDto> OverviewAsync(int rank = DomainConstants.DiagRankDefault, CancellationToken ct = default)
     {
@@ -51,6 +51,27 @@ public sealed class DiagnosticsService(IAppDbContext db, IPowerBoard board)
 
     public async Task<SensorReadingsDto> ReadingsAsync(CancellationToken ct = default) =>
         SensorReadingsDto.From(await board.ReadAsync(ct));
+
+    /// <summary>Acknowledge the board's latched protection fault (ACK_FAULT): ask the board to clear its FAULT
+    /// latch and record who acknowledged it on the universal operation log (category Falha). Any authenticated
+    /// operator may do this — clearing a fault is a panel safety action, not an Admin-only mutation. Returns
+    /// the post-ack readings; the authoritative cleared state arrives on the next 1 Hz diagnostics tick (the
+    /// board only releases the latch once no critical condition remains).</summary>
+    public async Task<SensorReadingsDto> AcknowledgeFaultAsync(CancellationToken ct = default)
+    {
+        // Capture the currently-latched code (if any) before the ack so the audit row names which fault was
+        // acknowledged. ReadAsync returns the cached last status — no extra round-trip on the real board.
+        var code = (await board.ReadAsync(ct)).FaultCode;
+        await board.AcknowledgeFaultAsync(ct);
+
+        // Logged as OperationType.Erro/OperationObject.Falha so it lands in the "Falha" sub-tab next to the
+        // fault it acknowledges; the operator (quem reconheceu) is taken from the current principal by AuditService.
+        audit.Record(OperationType.Erro, OperationObject.Falha, code,
+            [OperationField.Of("evento", "falha reconhecida"), OperationField.Of("codigo", code ?? "—")]);
+        await db.SaveChangesAsync(ct);
+
+        return await ReadingsAsync(ct);
+    }
 
     public async Task<SelfTestResultDto> SelfTestAsync(SelfTestId id, CancellationToken ct = default) =>
         SelfTestResultDto.From(await board.RunSelfTestAsync(id, ct));

@@ -3,6 +3,9 @@ namespace ReflowOven.Domain.Hardware;
 /// <summary>
 /// One telemetry tick from the power board (mirrors the frontend <c>SensorReadings</c>):
 /// grill type-K thermocouple, NTC heatsink, Hall-sensor output current, output voltage and fans.
+/// <see cref="FaultCode"/> carries the board's latched protection fault as a catalogued E-code (the status
+/// frame's <c>state == FAULT</c> + <c>fault_code</c>), or null when the board is OK — surfaced to the
+/// Diagnóstico tick so an operator sees an active fault live.
 /// </summary>
 public readonly record struct SensorReadings(
     double BoardTempC,
@@ -10,7 +13,8 @@ public readonly record struct SensorReadings(
     double OvenTempC,
     int OvenFanRpm,
     double VoltageV,
-    double CurrentA);
+    double CurrentA,
+    string? FaultCode = null);
 
 /// <summary>The power board's live run state (GET_RUN_STATUS) while its controller is driving the run. The
 /// driver returns null when no controller is driving (the simulator, or firmware reporting running=0); the run

@@ -11,6 +11,12 @@ public sealed class DiagnosticsController(DiagnosticsService diagnostics) : Cont
     [HttpGet("readings")]
     public Task<SensorReadingsDto> Readings(CancellationToken ct) => diagnostics.ReadingsAsync(ct);
 
+    /// <summary>Acknowledge and clear the board's latched protection fault (ACK_FAULT). Authenticated-by-default
+    /// (NOT AdminOnly): clearing a fault is a panel safety action any logged operator may take; the
+    /// acknowledgement is audited on the Log de Operação. Returns the post-ack sensor readings.</summary>
+    [HttpPost("ack-fault")]
+    public Task<SensorReadingsDto> AckFault(CancellationToken ct) => diagnostics.AcknowledgeFaultAsync(ct);
+
     [Authorize(Policy = AuthPolicies.AdminOnly)]
     [HttpPost("self-test")]
     public Task<SelfTestResultDto> SelfTest([FromBody] SelfTestRequest req, CancellationToken ct) => diagnostics.SelfTestAsync(req.Id, ct);

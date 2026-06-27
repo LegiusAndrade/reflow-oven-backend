@@ -190,7 +190,7 @@ public sealed class RunManager : IRunManager
             lock (_faultGate) { pending = _pendingFault; _pendingFault = null; }
             if (pending is { } boardFault)
             {
-                var (severity, message) = ResolveFault(boardFault.FaultTypeCode);
+                var (severity, message) = FaultCatalog.Resolve(boardFault.FaultTypeCode);
                 _logger.LogWarning("Execução '{Program}' (run {RunId}) abortada por falha da placa {Code}.",
                     run.ProgramName, run.RunId, boardFault.FaultTypeCode);
                 await FinalizeAsync(run, RunStatus.Aborted, new FaultInfo(
@@ -389,20 +389,6 @@ public sealed class RunManager : IRunManager
     {
         lock (_faultGate) _pendingFault ??= fault;
     }
-
-    /// <summary>Resolve a board E-code to its catalogued severity + message (the seeded <see cref="FaultType"/>
-    /// catalog — same source the DB is seeded from). An unknown code is treated as Crítico so a real fault is
-    /// never under-reported (the RS422 driver already normalises every fault bit to a catalogued code).</summary>
-    private static (ErrorSeverity Severity, string Message) ResolveFault(string code) =>
-        FaultCatalog.TryGetValue(code, out var ft)
-            ? (ft.Severity, ft.Message)
-            : (ErrorSeverity.Critico, $"Falha não catalogada da placa de potência ({code}).");
-
-    /// <summary>E-code → catalogued <see cref="FaultType"/> (severity + message), built once from the same
-    /// <see cref="Defaults.FaultTypes"/> source the seeder uses, so a run's recorded fault stays in lock-step
-    /// with the Diagnóstico/Relatórios catalog.</summary>
-    private static readonly IReadOnlyDictionary<string, FaultType> FaultCatalog =
-        Defaults.FaultTypes().ToDictionary(f => f.Code);
 
     /// <summary>A real (non-abort) fault descriptor that turns a finalize into a Falha + linked ErrorLogEntry.
     /// Raised either by the in-tick comms-loss (E-130) check or by a power-board protection fault delivered

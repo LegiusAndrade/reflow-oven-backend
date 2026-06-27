@@ -144,6 +144,7 @@ public sealed class RunManagerFaultTests
         public Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default) => Task.CompletedTask;
         public Task<RunReadback?> GetRunStatusAsync(CancellationToken ct = default) => Task.FromResult<RunReadback?>(null);
         public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task AcknowledgeFaultAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ApplyCalibrationAsync(Calibration calibration, CancellationToken ct = default) => Task.CompletedTask;
         public Task ApplyControlConfigAsync(Settings settings, CancellationToken ct = default) => Task.CompletedTask;
         public Task<SelfTestResult> RunSelfTestAsync(SelfTestId id, CancellationToken ct = default) => Task.FromResult(new SelfTestResult(id, SelfTestState.Idle));

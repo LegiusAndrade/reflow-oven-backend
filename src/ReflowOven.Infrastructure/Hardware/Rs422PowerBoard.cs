@@ -27,7 +27,7 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private const byte StatusOk = 0x00; // RESPONSE/NACK status: OK=0, UNKNOWN_CMD=1, BAD_PARAM=2, BUSY=3, ERROR=0xFF
     private const byte CmdGetStatus = 0x01, CmdSetConfiguration = 0x02, CmdStartProgram = 0x05, CmdStop = 0x06,
                        CmdSetCalibration = 0x07, CmdSelfTest = 0x08, CmdDriveOutput = 0x09, CmdGetIdentity = 0x0A,
-                       CmdGetRunStatus = 0x0B, CmdAutoTune = 0x0D, CmdGetConfiguration = 0x0E;
+                       CmdGetRunStatus = 0x0B, CmdAutoTune = 0x0D, CmdGetConfiguration = 0x0E, CmdAckFault = 0x0F;
 
     private const int StatusPayloadSize = 35;        // periodic 1 Hz telemetry (SerializeStatus)
     private const int StartProgramSegsPerChunk = 48; // segments per START_PROGRAM chunk (≤6 B header + 48×5 ≤ 255 B)
@@ -216,6 +216,13 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
 
     /// <summary>STOP: abort the run (heater off, fans safe).</summary>
     public Task StopAsync(CancellationToken ct = default) => RequestAsync(CmdStop, [], ct);
+
+    /// <summary>ACK_FAULT (0x0F): ask the board to clear its latched protection fault. REQUEST with no payload;
+    /// the firmware replies OK and releases the latch once no critical condition remains (it stays latched, and
+    /// remembers the acknowledgement, while the cause is still active). The cleared state is observed on the
+    /// next 1 Hz status push (fault_code back to 0), so we don't touch the cached fault here — the board stays
+    /// authoritative.</summary>
+    public Task AcknowledgeFaultAsync(CancellationToken ct = default) => RequestAsync(CmdAckFault, [], ct);
 
     /// <summary>SET_CALIBRATION: push the sensor offsets/gain + fan-PWM band. The firmware reserves the blob
     /// layout (it acknowledges without decoding yet); this is the agreed 8-byte little-endian shape.</summary>
@@ -546,12 +553,14 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         var fanIntake = BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(17, 2));
         var fanBoard = BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(21, 2));
 
+        var code = MapFaultCode(faultCode, faultFlags); // catalogued E-code, or null when no fault is latched
+
         lock (_stateGate)
         {
-            _last = new SensorReadings(boardC, fanBoard, ovenC, fanIntake, vbusV, currentA);
+            _last = new SensorReadings(boardC, fanBoard, ovenC, fanIntake, vbusV, currentA, code);
         }
 
-        RaiseBoardFault(faultCode, faultFlags);
+        RaiseBoardFault(code, faultFlags);
     }
 
     /// <summary>The firmware fault bitfield mapped to the catalogued E-codes, in raise-priority order
@@ -570,16 +579,20 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         (1 << 8, "E-150"), // FAN        — a fan stalled
     ];
 
-    private void RaiseBoardFault(ushort faultCode, ushort faultFlags)
+    /// <summary>Map the firmware fault bitfield to a catalogued E-code, or null when no fault is latched
+    /// (<c>fault_code == 0</c>). The first matching flag in raise-priority order wins; a set <c>fault_code</c>
+    /// with no known flag bit is treated as a generic critical (E-101) so a real fault is never dropped. Pure,
+    /// so the same code feeds both the cached <see cref="SensorReadings.FaultCode"/> and the edge-trigger.</summary>
+    private static string? MapFaultCode(ushort faultCode, ushort faultFlags)
     {
-        string? code = null;
-        if (faultCode != 0)
-        {
-            foreach (var (bit, c) in FaultBitMap)
-                if ((faultFlags & bit) != 0) { code = c; break; }
-            code ??= "E-101"; // a fault is set but no known flag bit — treat as a generic critical
-        }
+        if (faultCode == 0) return null;
+        foreach (var (bit, c) in FaultBitMap)
+            if ((faultFlags & bit) != 0) return c;
+        return "E-101";
+    }
 
+    private void RaiseBoardFault(string? code, ushort faultFlags)
+    {
         bool changed;
         lock (_stateGate)
         {

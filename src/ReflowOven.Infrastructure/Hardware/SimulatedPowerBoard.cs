@@ -14,6 +14,7 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
     private List<ProfilePoint> _profile = [];
     private AutoTuneState _tuneState;
     private DateTimeOffset _tuneStartedAt;
+    private string? _faultCode; // simulated latched fault (null = OK); cleared by AcknowledgeFaultAsync
 
 #pragma warning disable CS0067 // The simulator stays on the happy path; faults come from the real board.
     public event EventHandler<FaultRaised>? FaultRaised;
@@ -27,10 +28,12 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
     {
         double ovenSet;
         bool running;
+        string? fault;
         lock (_gate)
         {
             running = _running;
             ovenSet = _running ? ProfileBuilder.TempAt(_profile, (clock.UtcNow - _startedAt).TotalSeconds) : DomainConstants.StartTemp;
+            fault = _faultCode;
         }
 
         var oven = Clamp(Wander(ovenSet, 1.5), 0, 300);
@@ -40,7 +43,7 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
         var ovenFan = (int)ToStep(Clamp(Wander(running ? 1000 + oven / 300.0 * 4000 : 1500, 60), 0, 6000), 10);
         var boardFan = (int)ToStep(Clamp(Wander(800 + board / 200.0 * 4000, 60), 0, 6000), 10);
 
-        return Task.FromResult(new SensorReadings(board, boardFan, oven, ovenFan, voltage, current));
+        return Task.FromResult(new SensorReadings(board, boardFan, oven, ovenFan, voltage, current, fault));
     }
 
     /// <summary>The simulator has no separate controller — the run loop interpolates the profile itself.</summary>
@@ -60,6 +63,15 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
     public Task StopAsync(CancellationToken ct = default)
     {
         lock (_gate) _running = false;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Clear the simulated latched fault, returning the board to OK. The simulator stays on the happy
+    /// path (it never raises a fault on its own), so this is normally a no-op — it exists to honour the
+    /// ACK_FAULT contract and lets the acknowledge flow be exercised without hardware.</summary>
+    public Task AcknowledgeFaultAsync(CancellationToken ct = default)
+    {
+        lock (_gate) _faultCode = null;
         return Task.CompletedTask;
     }
 

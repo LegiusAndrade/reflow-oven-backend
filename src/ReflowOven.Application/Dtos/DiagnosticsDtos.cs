@@ -22,17 +22,34 @@ public sealed record DiagnosticsOverviewDto(
     IReadOnlyList<RankedUserDto> TopUsers,
     IReadOnlyList<RankedProgramDto> TopPrograms);
 
-/// <summary>Live sensor readings (Diagnóstico → Sensores), also pushed over the diagnostics hub.</summary>
+/// <summary>The board's latched protection fault as carried on the diagnostics tick — null when the board is
+/// OK. Derived from the status frame's fault code, mapped through the seeded <see cref="FaultType"/> catalog
+/// for the pt-BR <see cref="ErrorSeverity"/> (<c>Crítico</c>/<c>Alerta</c>/<c>Aviso</c>) and message. The
+/// JSON shape <c>fault: { code, severity, message } | null</c> is the contract with the frontend.</summary>
+public sealed record FaultInfoDto(string Code, ErrorSeverity Severity, string Message)
+{
+    /// <summary>Map a latched E-code (or null when OK) to the fault info the diagnostics tick exposes.</summary>
+    public static FaultInfoDto? From(string? code)
+    {
+        if (code is null) return null;
+        var (severity, message) = FaultCatalog.Resolve(code);
+        return new FaultInfoDto(code, severity, message);
+    }
+}
+
+/// <summary>Live sensor readings (Diagnóstico → Sensores), also pushed over the diagnostics hub. <see
+/// cref="Fault"/> is the board's latched protection fault (null when OK).</summary>
 public sealed record SensorReadingsDto(
     double BoardTempC,
     int BoardFanRpm,
     double OvenTempC,
     int OvenFanRpm,
     double VoltageV,
-    double CurrentA)
+    double CurrentA,
+    FaultInfoDto? Fault)
 {
     public static SensorReadingsDto From(SensorReadings r) =>
-        new(r.BoardTempC, r.BoardFanRpm, r.OvenTempC, r.OvenFanRpm, r.VoltageV, r.CurrentA);
+        new(r.BoardTempC, r.BoardFanRpm, r.OvenTempC, r.OvenFanRpm, r.VoltageV, r.CurrentA, FaultInfoDto.From(r.FaultCode));
 }
 
 public sealed record SelfTestResultDto(SelfTestId Id, SelfTestState State, string? Message)
