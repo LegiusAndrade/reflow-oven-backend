@@ -60,7 +60,17 @@ public sealed class SettingsService(IAppDbContext db, IPowerBoard board, ISystem
         await audit.BumpActivityAsync(Defaults.ActivityLabels[0], ct); // configurações alteradas
         await db.SaveChangesAsync(ct);
 
-        await board.ApplyControlConfigAsync(s, ct);
+        // Push the control config to the board. Best-effort: the settings are already persisted, so a failed
+        // push (board offline, no RS422 link, dev box) is logged but never fails the save — same policy as the
+        // network apply below.
+        try
+        {
+            await board.ApplyControlConfigAsync(s, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Configuração salva, mas não foi aplicada na placa de controle.");
+        }
 
         // Push the new network config to the OS. Best-effort: the settings are already persisted, so a
         // failed apply (no privileges, no active connection, dev box) is logged but never fails the save.
@@ -134,6 +144,10 @@ public sealed class SettingsService(IAppDbContext db, IPowerBoard board, ISystem
         Num("Tensão mínima", s.Voltage.Min, d.Voltage.Min, " V");
         Num("Tensão máxima", s.Voltage.Max, d.Voltage.Max, " V");
         if (s.Network.Ip != d.Network.Ip) b.Add($"IP: {s.Network.Ip} → {d.Network.Ip}");
+        if (s.Network.Mask != d.Network.Mask) b.Add($"Máscara: {s.Network.Mask} → {d.Network.Mask}");
+        if (s.Network.Gateway != d.Network.Gateway) b.Add($"Gateway: {s.Network.Gateway} → {d.Network.Gateway}");
+        if (s.Network.DnsPrimary != d.Network.DnsPrimary) b.Add($"DNS primário: {s.Network.DnsPrimary} → {d.Network.DnsPrimary}");
+        if (s.Network.DnsSecondary != d.Network.DnsSecondary) b.Add($"DNS secundário: {s.Network.DnsSecondary} → {d.Network.DnsSecondary}");
         if (s.Network.StaticIp != d.Network.StaticIp) b.Add($"IP fixo: {(s.Network.StaticIp ? "sim" : "não")} → {(d.Network.StaticIp ? "sim" : "não")}");
         return b;
     }

@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore.Storage;
+
 namespace ReflowOven.Application.Abstractions;
 
 /// <summary>
@@ -34,6 +36,12 @@ public interface IAppDbContext
     DbSet<AutotuneRun> AutotuneRuns { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
+
+    /// <summary>Begins a database transaction so a multi-statement mutation built from individually
+    /// auto-committing bulk operations (<c>ExecuteDelete</c>/<c>ExecuteUpdate</c>) is atomic. Returns
+    /// <c>null</c> on providers without real transaction support (the in-memory test store), so callers
+    /// degrade to running without one.</summary>
+    Task<IDbContextTransaction?> BeginTransactionAsync(CancellationToken ct = default);
 
     /// <summary>Real on-disk size of the database in bytes (PostgreSQL <c>pg_database_size</c>).</summary>
     Task<long> GetDatabaseSizeBytesAsync(CancellationToken ct = default);

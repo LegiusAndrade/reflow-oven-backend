@@ -1,7 +1,7 @@
 namespace ReflowOven.Application.Services;
 
 /// <summary>Reads/updates the calibration singleton, pushes it to the board, and fits the output wizard sweep.</summary>
-public sealed class CalibrationService(IAppDbContext db, IPowerBoard board, AuditService audit)
+public sealed class CalibrationService(IAppDbContext db, IPowerBoard board, AuditService audit, ILogger<CalibrationService> logger)
 {
     public async Task<CalibrationDto> GetAsync(CancellationToken ct = default) => Map(await LoadAsync(ct));
 
@@ -25,7 +25,17 @@ public sealed class CalibrationService(IAppDbContext db, IPowerBoard board, Audi
         c.FanPwmMax = dto.FanPwmMax;
         audit.Record(OperationType.Calibracao, OperationObject.Controlador, null, changes, operatorName: "Calibração");
         await db.SaveChangesAsync(ct);
-        await board.ApplyCalibrationAsync(c, ct);
+
+        // Push the calibration to the board. Best-effort: it is already persisted, so a failed push (board
+        // offline, no RS422 link, dev box) is logged but never fails the save — same policy as SettingsService.
+        try
+        {
+            await board.ApplyCalibrationAsync(c, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Calibração salva, mas não foi aplicada na placa de controle.");
+        }
         return Map(c);
     }
 

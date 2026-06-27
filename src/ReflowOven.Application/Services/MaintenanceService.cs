@@ -86,50 +86,63 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var now = clock.UtcNow;
         var actor = current.Name;
         var deleted = 0;
-        foreach (var cat in cats)
+        // Each per-category bulk delete/update auto-commits on its own; wrap the whole sequence (and the audit
+        // row) in one transaction so a failure midway can't leave the database partially cleared. No-op on the
+        // in-memory test store, where BeginTransactionAsync returns null.
+        await using var tx = await db.BeginTransactionAsync(ct);
+        try
         {
-            deleted += cat switch
+            foreach (var cat in cats)
             {
-                CleanupId.Execucoes => await db.Executions.ExecuteDeleteAsync(ct),
-                // The Alterações (audit) log is protected — reject any attempt to clear it.
-                CleanupId.Alteracoes => throw new ValidationAppException("O log de Alterações (auditoria) é protegido e não pode ser apagado."),
-                CleanupId.Falhas => await db.Errors.ExecuteDeleteAsync(ct),
-                CleanupId.Logs => await db.SystemLog.ExecuteDeleteAsync(ct),
-                // Users/programs are SOFT-deleted: the Admin never destroys data, it sends it to the Master's
-                // Lixeira (who alone restores or permanently purges it). Only the trash categories below — and a
-                // factory reset — actually delete rows. Stamped with who/when so the trash shows "deleted by".
-                CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo)
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(u => u.IsDeleted, true)
-                        .SetProperty(u => u.DeletedAt, now)
-                        .SetProperty(u => u.DeletedBy, actor), ct),
-                // Saved (active, user-created) programs — the factory seed catalog is kept; favorites stay until
-                // the Master purges the trash (soft-delete, not a cascading hard delete).
-                CleanupId.Programas => await db.Programs.Where(p => !p.IsSeed)
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(p => p.IsDeleted, true)
-                        .SetProperty(p => p.DeletedAt, now)
-                        .SetProperty(p => p.DeletedBy, actor), ct),
-                // ACTIVE users only (inativos have their own category), except the caller and the hidden Master
-                // (the spare-the-signed-in rule is server-side).
-                CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId))
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(u => u.IsDeleted, true)
-                        .SetProperty(u => u.DeletedAt, now)
-                        .SetProperty(u => u.DeletedBy, actor), ct),
-                // Empty the program trash: permanently delete every soft-deleted program (favorites cascade).
-                CleanupId.ProgramasDeletados => await db.Programs.IgnoreQueryFilters().Where(p => p.IsDeleted).ExecuteDeleteAsync(ct),
-                // Empty the user trash: permanently delete every soft-deleted user.
-                CleanupId.UsuariosDeletados => await db.Users.IgnoreQueryFilters().Where(u => u.IsDeleted).ExecuteDeleteAsync(ct),
-                _ => 0,
-            };
+                deleted += cat switch
+                {
+                    CleanupId.Execucoes => await db.Executions.ExecuteDeleteAsync(ct),
+                    // The Alterações (audit) log is protected — reject any attempt to clear it.
+                    CleanupId.Alteracoes => throw new ValidationAppException("O log de Alterações (auditoria) é protegido e não pode ser apagado."),
+                    CleanupId.Falhas => await db.Errors.ExecuteDeleteAsync(ct),
+                    CleanupId.Logs => await db.SystemLog.ExecuteDeleteAsync(ct),
+                    // Users/programs are SOFT-deleted: the Admin never destroys data, it sends it to the Master's
+                    // Lixeira (who alone restores or permanently purges it). Only the trash categories below — and a
+                    // factory reset — actually delete rows. Stamped with who/when so the trash shows "deleted by".
+                    CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(u => u.IsDeleted, true)
+                            .SetProperty(u => u.DeletedAt, now)
+                            .SetProperty(u => u.DeletedBy, actor), ct),
+                    // Saved (active, user-created) programs — the factory seed catalog is kept; favorites stay until
+                    // the Master purges the trash (soft-delete, not a cascading hard delete).
+                    CleanupId.Programas => await db.Programs.Where(p => !p.IsSeed)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(p => p.IsDeleted, true)
+                            .SetProperty(p => p.DeletedAt, now)
+                            .SetProperty(p => p.DeletedBy, actor), ct),
+                    // ACTIVE users only (inativos have their own category), except the caller and the hidden Master
+                    // (the spare-the-signed-in rule is server-side).
+                    CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId))
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(u => u.IsDeleted, true)
+                            .SetProperty(u => u.DeletedAt, now)
+                            .SetProperty(u => u.DeletedBy, actor), ct),
+                    // Empty the program trash: permanently delete every soft-deleted program (favorites cascade).
+                    CleanupId.ProgramasDeletados => await db.Programs.IgnoreQueryFilters().Where(p => p.IsDeleted).ExecuteDeleteAsync(ct),
+                    // Empty the user trash: permanently delete every soft-deleted user.
+                    CleanupId.UsuariosDeletados => await db.Users.IgnoreQueryFilters().Where(u => u.IsDeleted).ExecuteDeleteAsync(ct),
+                    _ => 0,
+                };
+            }
+            audit.Record(OperationType.Limpeza, OperationObject.Configuracao, null,
+            [
+                OperationField.Of("categorias", string.Join(", ", cats.Select(c => EnumWire.ToWire(c)))),
+                OperationField.Of("removidos", deleted),
+            ]);
+            await db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
         }
-        audit.Record(OperationType.Limpeza, OperationObject.Configuracao, null,
-        [
-            OperationField.Of("categorias", string.Join(", ", cats.Select(c => EnumWire.ToWire(c)))),
-            OperationField.Of("removidos", deleted),
-        ]);
-        await db.SaveChangesAsync(ct);
+        catch
+        {
+            if (tx is not null) await tx.RollbackAsync(ct);
+            throw;
+        }
         return new CleanupResultDto(deleted);
     }
 
@@ -139,52 +152,66 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         if (confirm != "RESETAR")
             throw new ValidationAppException("Digite RESETAR para confirmar.");
 
-        // History & per-user state.
-        await db.LogEvents.ExecuteDeleteAsync(ct);
-        await db.Executions.ExecuteDeleteAsync(ct);
-        await db.Errors.ExecuteDeleteAsync(ct);
-        await db.Changes.ExecuteDeleteAsync(ct);
-        await db.SystemLog.ExecuteDeleteAsync(ct);
-        await db.OperationLog.ExecuteDeleteAsync(ct);
-        // IgnoreQueryFilters so the reset also wipes soft-deleted rows (the global filters hide them otherwise).
-        await db.Favorites.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
-        await db.PasswordResetTokens.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
-        await db.UserActivityStats.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
-        await db.Users.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
-
-        // Programs: drop ALL (including hidden seeds) and reseed just the factory default.
-        await db.Programs.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
-        db.Programs.Add(Defaults.FactoryProgram());
-
-        // Single Admin — config-driven (Admin__*), same as the initial seed.
-        db.Users.Add(new User
+        // The wipe is a long sequence of individually auto-committing bulk deletes plus the reseed; run it all
+        // in one transaction so a mid-sequence failure can't leave a half-reset database. No-op on the in-memory
+        // test store, where BeginTransactionAsync returns null.
+        await using var tx = await db.BeginTransactionAsync(ct);
+        try
         {
-            Id = Guid.NewGuid(),
-            Name = adminCreds.Username,
-            Email = adminCreds.Email,
-            PasswordHash = hasher.Hash(adminCreds.Password),
-            Type = UserType.Admin,
-            Status = UserStatus.Ativo,
-            CreatedAt = clock.UtcNow,
-            MustChangePassword = false,
-        });
+            // History & per-user state.
+            await db.LogEvents.ExecuteDeleteAsync(ct);
+            await db.Executions.ExecuteDeleteAsync(ct);
+            await db.Errors.ExecuteDeleteAsync(ct);
+            await db.Changes.ExecuteDeleteAsync(ct);
+            await db.SystemLog.ExecuteDeleteAsync(ct);
+            await db.OperationLog.ExecuteDeleteAsync(ct);
+            // IgnoreQueryFilters so the reset also wipes soft-deleted rows (the global filters hide them otherwise).
+            await db.Favorites.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+            await db.PasswordResetTokens.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+            await db.UserActivityStats.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+            await db.Users.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
 
-        // The dev Master superuser survives the reset (it was wiped with the rest above, so recreate it).
-        db.Users.Add(Defaults.BuildMasterUser(master, hasher, clock));
+            // Programs: drop ALL (including hidden seeds) and reseed just the factory default.
+            await db.Programs.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+            db.Programs.Add(Defaults.FactoryProgram());
 
-        // Settings & calibration back to defaults.
-        await db.NotificationSettings.ExecuteDeleteAsync(ct);
-        await db.RunSeriesPreferences.ExecuteDeleteAsync(ct);
-        await db.Settings.ExecuteDeleteAsync(ct);
-        db.Settings.Add(Defaults.Settings());
-        await db.Calibrations.ExecuteDeleteAsync(ct);
-        db.Calibrations.Add(Defaults.Calibration());
+            // Single Admin — config-driven (Admin__*), same as the initial seed.
+            db.Users.Add(new User
+            {
+                Id = Guid.NewGuid(),
+                Name = adminCreds.Username,
+                Email = adminCreds.Email,
+                PasswordHash = hasher.Hash(adminCreds.Password),
+                Type = UserType.Admin,
+                Status = UserStatus.Ativo,
+                CreatedAt = clock.UtcNow,
+                MustChangePassword = false,
+            });
 
-        await db.SaveChangesAsync(ct);
+            // The dev Master superuser survives the reset (it was wiped with the rest above, so recreate it).
+            db.Users.Add(Defaults.BuildMasterUser(master, hasher, clock));
 
-        // The reset itself is audited — the first row of the fresh operation log.
-        audit.Record(OperationType.ResetFabrica, OperationObject.Sistema, null, [OperationField.Of("confirmacao", "RESETAR")]);
-        await db.SaveChangesAsync(ct);
+            // Settings & calibration back to defaults.
+            await db.NotificationSettings.ExecuteDeleteAsync(ct);
+            await db.RunSeriesPreferences.ExecuteDeleteAsync(ct);
+            await db.Settings.ExecuteDeleteAsync(ct);
+            db.Settings.Add(Defaults.Settings());
+            await db.Calibrations.ExecuteDeleteAsync(ct);
+            db.Calibrations.Add(Defaults.Calibration());
+
+            await db.SaveChangesAsync(ct);
+
+            // The reset itself is audited — the first row of the fresh operation log.
+            audit.Record(OperationType.ResetFabrica, OperationObject.Sistema, null, [OperationField.Of("confirmacao", "RESETAR")]);
+            await db.SaveChangesAsync(ct);
+
+            if (tx is not null) await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            if (tx is not null) await tx.RollbackAsync(ct);
+            throw;
+        }
     }
 
 }

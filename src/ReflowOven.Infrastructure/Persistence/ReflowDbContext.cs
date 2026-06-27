@@ -1,4 +1,5 @@
 using System.Data;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ReflowOven.Infrastructure.Persistence.Conversions;
 
@@ -267,6 +268,11 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             }
         }
     }
+
+    /// <summary>Begins a transaction when the provider supports one (PostgreSQL); returns <c>null</c> for the
+    /// in-memory store used in tests so a caller's commit/rollback degrades to a no-op.</summary>
+    public async Task<IDbContextTransaction?> BeginTransactionAsync(CancellationToken ct = default) =>
+        Database.IsRelational() ? await Database.BeginTransactionAsync(ct) : null;
 
     /// <summary>Real on-disk size of the database in bytes via PostgreSQL <c>pg_database_size</c>.</summary>
     public async Task<long> GetDatabaseSizeBytesAsync(CancellationToken ct = default) =>
