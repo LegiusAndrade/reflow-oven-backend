@@ -10,17 +10,48 @@ namespace ReflowOven.Infrastructure.Run;
 /// drives <see cref="TickAsync"/>. On a terminal state it persists the <see cref="ExecutionReport"/>
 /// (in a fresh scope) and emits the SignalR completion. State changes are serialized with a semaphore.
 /// </summary>
-public sealed class RunManager(
-    IServiceScopeFactory scopeFactory,
-    IPowerBoard board,
-    ITelemetrySink sink,
-    ISystemLogSink systemLog,
-    INotificationSink notifications,
-    IClock clock,
-    ILogger<RunManager> logger) : IRunManager
+public sealed class RunManager : IRunManager
 {
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IPowerBoard _board;
+    private readonly ITelemetrySink _sink;
+    private readonly ISystemLogSink _systemLog;
+    private readonly INotificationSink _notifications;
+    private readonly IClock _clock;
+    private readonly ILogger<RunManager> _logger;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ActiveRun? _active;
+
+    // A power-board protection fault is delivered on the RS422 RX thread (OnBoardFault). That thread must NOT
+    // touch _active (only mutated under _gate), so the handler just stashes the fault here and the next
+    // gate-serialized TickAsync consumes it. Guarded by its own lock (a nullable struct is not read/written
+    // atomically); kept separate from _gate so the RX thread never blocks on a long tick.
+    private readonly Lock _faultGate = new();
+    private FaultRaised? _pendingFault;
+
+    public RunManager(
+        IServiceScopeFactory scopeFactory,
+        IPowerBoard board,
+        ITelemetrySink sink,
+        ISystemLogSink systemLog,
+        INotificationSink notifications,
+        IClock clock,
+        ILogger<RunManager> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _board = board;
+        _sink = sink;
+        _systemLog = systemLog;
+        _notifications = notifications;
+        _clock = clock;
+        _logger = logger;
+        // Subscribe once for the manager's lifetime — same pattern as AutotuneManager. Both this and the board
+        // are singletons, so this never leaks (no per-run += that would need a matching -=). A board protection
+        // fault keeps the RS422 link UP, so FaultRaised is the only signal a run gets for it; without this the
+        // event fired into the void during a run and a hardware fault was wrongly recorded as "Concluído".
+        _board.FaultRaised += OnBoardFault;
+    }
 
     public RunStatusDto? GetStatus() => _active is { } run ? BuildStatus(run) : null;
 
@@ -34,7 +65,7 @@ public sealed class RunManager(
             if (_active is { Status: RunStatus.Running })
                 throw new ConflictException("Já existe uma execução em andamento.");
 
-            using var scope = scopeFactory.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
             var audit = scope.ServiceProvider.GetRequiredService<AuditService>();
 
@@ -64,12 +95,12 @@ public sealed class RunManager(
             // RunCount/LastUsed (and the "mais usados" ranking) for an execution that never happened.
             try
             {
-                await board.StartProgramAsync(segments, profile, ct);
+                await _board.StartProgramAsync(segments, profile, ct);
             }
             catch (Exception ex)
             {
                 // Board refused to start: leave _active null (no zombie run) and surface the failure.
-                logger.LogError(ex, "Falha ao iniciar o programa '{Program}' na placa.", program.Name);
+                _logger.LogError(ex, "Falha ao iniciar o programa '{Program}' na placa.", program.Name);
                 audit.Record(OperationType.Comunicacao, OperationObject.Controlador, program.Id,
                     [OperationField.Of("evento", "falha ao iniciar na placa"), OperationField.Of("erro", ex.Message)],
                     operatorId: userId, operatorName: userName ?? "Sistema");
@@ -78,7 +109,7 @@ public sealed class RunManager(
             }
 
             program.RunCount++;
-            program.LastUsed = clock.UtcNow;
+            program.LastUsed = _clock.UtcNow;
 
             var run = new ActiveRun
             {
@@ -89,19 +120,22 @@ public sealed class RunManager(
                 UserName = userName,
                 Profile = profile,
                 Stages = stages,
-                StartedAt = clock.UtcNow,
+                StartedAt = _clock.UtcNow,
                 TotalSeconds = ProfileBuilder.TotalTime(profile),
                 Status = RunStatus.Running,
                 Phase = RunPhase.Aquecimento,
             };
             _active = run;
+            // Drop any board fault left over from before this run (an edge raised while idle) so it can't
+            // finalize the fresh run on its very first tick.
+            lock (_faultGate) _pendingFault = null;
             audit.Record(OperationType.Execucao, OperationObject.Execucao, run.RunId.ToString(),
                 [OperationField.Of("evento", "iniciada"), OperationField.Of("programa", run.ProgramName)],
                 operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("Execução iniciada: '{Program}' por '{User}' (run {RunId}, {Total}s).",
+            _logger.LogInformation("Execução iniciada: '{Program}' por '{User}' (run {RunId}, {Total}s).",
                 run.ProgramName, userName ?? "técnico", run.RunId, (int)run.TotalSeconds);
-            await sink.PublishStatusAsync(run.RunId, RunStatus.Running);
+            await _sink.PublishStatusAsync(run.RunId, RunStatus.Running);
             return BuildStatus(run);
         }
         finally
@@ -137,21 +171,39 @@ public sealed class RunManager(
             // the heater goes uncontrolled, so don't keep interpolating a phantom run — finalize it as a
             // comms-loss fault (E-130). IsConnected is debounced by the board's LinkTimeoutMs watchdog, so a
             // single dropped frame won't trip it; only a real ≥LinkTimeoutMs silence (a reset) does.
-            if (!board.IsConnected)
+            if (!_board.IsConnected)
             {
-                logger.LogWarning("Execução '{Program}' (run {RunId}) abortada: link RS422 perdido (E-130).",
+                _logger.LogWarning("Execução '{Program}' (run {RunId}) abortada: link RS422 perdido (E-130).",
                     run.ProgramName, run.RunId);
                 await FinalizeAsync(run, RunStatus.Aborted, new FaultInfo(
                     "E-130", ErrorSeverity.Alerta, "Perda de comunicação RS422 com a placa de potência durante a execução.",
-                    (int)Math.Round((clock.UtcNow - run.StartedAt).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
+                    (int)Math.Round((_clock.UtcNow - run.StartedAt).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
                 return;
             }
 
-            var elapsed = (clock.UtcNow - run.StartedAt).TotalSeconds;
-            var reading = await board.ReadAsync(ct);
+            // A power-board PROTECTION fault (over-temp E-101, thermocouple E-102, over-current E-110,
+            // over/under-voltage E-120, NTC E-140, fan E-150, …) leaves the RS422 link UP, so it never trips
+            // the comms-loss check above — it arrives asynchronously on the RX thread via FaultRaised and is
+            // stashed by OnBoardFault. Consume it here, on the gate-serialized path, and finalize the run as a
+            // Falha — exactly like the E-130 case, but with the E-code/severity/message from the fault catalog.
+            FaultRaised? pending;
+            lock (_faultGate) { pending = _pendingFault; _pendingFault = null; }
+            if (pending is { } boardFault)
+            {
+                var (severity, message) = ResolveFault(boardFault.FaultTypeCode);
+                _logger.LogWarning("Execução '{Program}' (run {RunId}) abortada por falha da placa {Code}.",
+                    run.ProgramName, run.RunId, boardFault.FaultTypeCode);
+                await FinalizeAsync(run, RunStatus.Aborted, new FaultInfo(
+                    boardFault.FaultTypeCode, severity, message,
+                    (int)Math.Round((_clock.UtcNow - run.StartedAt).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
+                return;
+            }
+
+            var elapsed = (_clock.UtcNow - run.StartedAt).TotalSeconds;
+            var reading = await _board.ReadAsync(ct);
             // Prefer the firmware's real setpoint/phase when its controller is driving; fall back to the locally
             // interpolated curve (the simulator and a not-yet-controlling firmware return null).
-            var runback = await board.GetRunStatusAsync(ct);
+            var runback = await _board.GetRunStatusAsync(ct);
             var alvo = runback?.SetpointC ?? ProfileBuilder.TempAt(run.Profile, elapsed);
 
             // Telemetry is streamed and stored at 2 decimals (Alvo is interpolated, so it would otherwise
@@ -169,9 +221,9 @@ public sealed class RunManager(
             if (phase != run.Phase)
             {
                 run.Phase = phase;
-                await sink.PublishPhaseAsync(run.RunId, phase);
+                await _sink.PublishPhaseAsync(run.RunId, phase);
             }
-            await sink.PublishTraceAsync(run.RunId, sample);
+            await _sink.PublishTraceAsync(run.RunId, sample);
 
             if (elapsed >= run.TotalSeconds)
                 await FinalizeAsync(run, RunStatus.Done, null, ct);
@@ -184,12 +236,17 @@ public sealed class RunManager(
 
     private async Task FinalizeAsync(ActiveRun run, RunStatus status, FaultInfo? fault, CancellationToken ct)
     {
+        // Any board fault stashed by the RX thread belongs to no run once this finalize completes (the E-130
+        // path above can race a FaultRaised, and a manual abort may have stashed one): drop it so it can't
+        // leak into the next run. The in-tick fault path already read-and-cleared it; this covers the others.
+        lock (_faultGate) _pendingFault = null;
+
         // Best-effort: a finalize triggered BY a dead/offline board (the comms-loss fault) must still persist
         // the report — don't let an unanswered STOP throw and leave the run un-finalized (it would retry forever).
-        try { await board.StopAsync(ct); }
-        catch (Exception ex) { logger.LogWarning(ex, "Falha ao enviar STOP à placa ao finalizar (segue a finalização)."); }
+        try { await _board.StopAsync(ct); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Falha ao enviar STOP à placa ao finalizar (segue a finalização)."); }
         run.Status = status;
-        var endedAt = clock.UtcNow;
+        var endedAt = _clock.UtcNow;
         var duration = (int)Math.Round((endedAt - run.StartedAt).TotalSeconds);
 
         // A finalize carries a live wire status (done/aborted — the only RunStatus values) plus an optional
@@ -252,7 +309,7 @@ public sealed class RunManager(
                 + (fault is { } ff ? $" — {ff.Code}" : ""),
         };
 
-        using (var scope = scopeFactory.CreateScope())
+        using (var scope = _scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
             var audit = scope.ServiceProvider.GetRequiredService<AuditService>();
@@ -309,20 +366,47 @@ public sealed class RunManager(
                     [OperationField.Of("codigo", fa.Code), OperationField.Of("motivo", fa.Message)],
                     operatorId: run.UserId, operatorName: run.UserName ?? "Sistema");
             await db.SaveChangesAsync(ct);
-            await notifications.PublishAsync(NotificationDto.From(notification));
+            await _notifications.PublishAsync(NotificationDto.From(notification));
         }
 
         _active = null;
-        logger.LogInformation("Execução finalizada ({Status}): '{Program}' (run {RunId}, {Duration}s, pico {Peak} °C).",
+        _logger.LogInformation("Execução finalizada ({Status}): '{Program}' (run {RunId}, {Duration}s, pico {Peak} °C).",
             status, run.ProgramName, run.RunId, duration, report.PeakTemp);
-        await sink.PublishStatusAsync(run.RunId, status);
-        await sink.PublishCompletedAsync(run.RunId, report.Id);
+        await _sink.PublishStatusAsync(run.RunId, status);
+        await _sink.PublishCompletedAsync(run.RunId, report.Id);
         // Push the system-log line live to the Log do Sistema hub (Id now populated by the save above).
-        await systemLog.PublishAsync(new ReflowOven.Application.Dtos.SystemLogDto(logEntry.Id, logEntry.At, logEntry.Level, logEntry.Message));
+        await _systemLog.PublishAsync(new ReflowOven.Application.Dtos.SystemLogDto(logEntry.Id, logEntry.At, logEntry.Level, logEntry.Message));
     }
 
+    /// <summary>
+    /// A power-board protection fault arrives on the RS422 RX thread. It must NOT touch the run state here
+    /// (only mutated under <see cref="_gate"/>): stash the first fault of a burst and let the next
+    /// <see cref="TickAsync"/> finalize the active run on the serialized path — mirroring how the in-tick
+    /// comms-loss (E-130) check already finalizes. A fault raised while idle is dropped at the next StartAsync.
+    /// Same shape as <c>AutotuneManager.OnBoardFault</c> (which only records the code for its own poll).
+    /// </summary>
+    private void OnBoardFault(object? sender, FaultRaised fault)
+    {
+        lock (_faultGate) _pendingFault ??= fault;
+    }
+
+    /// <summary>Resolve a board E-code to its catalogued severity + message (the seeded <see cref="FaultType"/>
+    /// catalog — same source the DB is seeded from). An unknown code is treated as Crítico so a real fault is
+    /// never under-reported (the RS422 driver already normalises every fault bit to a catalogued code).</summary>
+    private static (ErrorSeverity Severity, string Message) ResolveFault(string code) =>
+        FaultCatalog.TryGetValue(code, out var ft)
+            ? (ft.Severity, ft.Message)
+            : (ErrorSeverity.Critico, $"Falha não catalogada da placa de potência ({code}).");
+
+    /// <summary>E-code → catalogued <see cref="FaultType"/> (severity + message), built once from the same
+    /// <see cref="Defaults.FaultTypes"/> source the seeder uses, so a run's recorded fault stays in lock-step
+    /// with the Diagnóstico/Relatórios catalog.</summary>
+    private static readonly IReadOnlyDictionary<string, FaultType> FaultCatalog =
+        Defaults.FaultTypes().ToDictionary(f => f.Code);
+
     /// <summary>A real (non-abort) fault descriptor that turns a finalize into a Falha + linked ErrorLogEntry.
-    /// No simulator path produces one today; the RS422 board would supply it when a catalogued fault fires.</summary>
+    /// Raised either by the in-tick comms-loss (E-130) check or by a power-board protection fault delivered
+    /// through <see cref="IPowerBoard.FaultRaised"/> (see <see cref="OnBoardFault"/>); the simulator produces none.</summary>
     private sealed record FaultInfo(string Code, ErrorSeverity Severity, string Message, int AtT, int AtTemp);
 
     /// <summary>Direct-import programs (a curve sent as points, no segments) become linear ramps so the power
@@ -394,7 +478,7 @@ public sealed class RunManager(
 
     private RunStatusDto BuildStatus(ActiveRun run)
     {
-        var elapsed = (clock.UtcNow - run.StartedAt).TotalSeconds;
+        var elapsed = (_clock.UtcNow - run.StartedAt).TotalSeconds;
         var progress = run.TotalSeconds > 0 ? Math.Min(1, elapsed / run.TotalSeconds) : 0;
         return new RunStatusDto(
             run.RunId, run.ProgramId, run.ProgramName, run.Status, run.Phase, run.StartedAt,
