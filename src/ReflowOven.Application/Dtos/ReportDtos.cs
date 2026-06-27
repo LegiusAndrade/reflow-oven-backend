@@ -50,6 +50,35 @@ public sealed record SnapshotSeriesDto(string Name, string Unit, string Color, d
 
 public sealed record FailureSnapshotDto(int DurationSec, IReadOnlyList<SnapshotSeriesDto> Series);
 
+/// <summary>One decoded sample of the board fault-snapshot buffer (GET_FAULT_SNAPSHOT) in engineering units.</summary>
+public sealed record BoardFaultSampleDto(
+    double OvenTempC,
+    double BoardTempC,
+    double VbusV,
+    double VregV,
+    double PdV,
+    double CurrentA,
+    int FanIntakeRpm,
+    int FanExhaustRpm,
+    int FanBoardRpm,
+    int DutyIntakePct,
+    int DutyExhaustPct,
+    int DutyBoardPct,
+    double McuTempC,
+    double VddaV,
+    int FaultFlags,
+    double SetpointC,
+    int BuckDutyPct,
+    int PowerW);
+
+/// <summary>The board's raw fault-snapshot telemetry buffer attached to a fault — metadata + the per-10 ms
+/// samples in engineering units. Null on a fault recorded without a successful board download.</summary>
+public sealed record BoardFaultSnapshotDto(
+    int SampleIntervalMs,
+    int TriggerIndex,
+    int FaultCode,
+    IReadOnlyList<BoardFaultSampleDto> Samples);
+
 public sealed record ErrorSummaryDto(
     Guid Id,
     DateTimeOffset At,
@@ -76,7 +105,11 @@ public sealed record ErrorDetailDto(
     int InputVoltage,
     int OutputVoltage,
     FailureSnapshotDto Snapshot,
-    IReadOnlyList<LogEventDto> Events);
+    IReadOnlyList<LogEventDto> Events,
+    /// <summary>The raw board fault-snapshot buffer (GET_FAULT_SNAPSHOT) downloaded around this fault, or null
+    /// when the board offered none / the download failed. Distinct from <see cref="Snapshot"/> (the presentational
+    /// chart series); omitted from the JSON when null.</summary>
+    BoardFaultSnapshotDto? BoardSnapshot = null);
 
 // --- changes ----------------------------------------------------------------------------
 public sealed record ChangePointRowDto(int Index, int Temp, int TimeSec, RampShape Ramp, ChangePointRole Role);

@@ -27,7 +27,10 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private const byte StatusOk = 0x00; // RESPONSE/NACK status: OK=0, UNKNOWN_CMD=1, BAD_PARAM=2, BUSY=3, ERROR=0xFF
     private const byte CmdGetStatus = 0x01, CmdSetConfiguration = 0x02, CmdStartProgram = 0x05, CmdStop = 0x06,
                        CmdSetCalibration = 0x07, CmdSelfTest = 0x08, CmdDriveOutput = 0x09, CmdGetIdentity = 0x0A,
-                       CmdGetRunStatus = 0x0B, CmdAutoTune = 0x0D, CmdGetConfiguration = 0x0E, CmdAckFault = 0x0F;
+                       CmdGetRunStatus = 0x0B, CmdAutoTune = 0x0D, CmdGetConfiguration = 0x0E, CmdAckFault = 0x0F,
+                       CmdGetFaultSnapshot = 0x10;
+
+    private const int MaxSnapshotChunks = 64; // sanity cap on the chunk loop (chunk_count is a u8 from the board)
 
     private const int StatusPayloadSize = 35;        // periodic 1 Hz telemetry (SerializeStatus)
     private const int StartProgramSegsPerChunk = 48; // segments per START_PROGRAM chunk (≤6 B header + 48×5 ≤ 255 B)
@@ -159,6 +162,61 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
         var ki = BinaryPrimitives.ReadSingleLittleEndian(resp.AsSpan(14));
         var kd = BinaryPrimitives.ReadSingleLittleEndian(resp.AsSpan(18));
         return new AutoTuneReadback(state, resp[1], ku, (int)Math.Min(tuMs, int.MaxValue), kp, ki, kd);
+    }
+
+    /// <summary>GET_FAULT_SNAPSHOT (0x10): download the board's fault telemetry buffer as a chunked transfer and
+    /// decode it to engineering units. The host asks for one chunk at a time (REQUEST payload: chunk_index:u8);
+    /// the board replies with a <see cref="FaultSnapshotCodec.HeaderSize"/>-byte header
+    /// (<c>total_samples:u16, sample_size:u8, trigger_index:u16, fault_code:u16, base_ms:u32, chunk_index:u8,
+    /// chunk_count:u8</c>) followed by that chunk's 32-byte samples. The first reply carries <c>chunk_count</c>,
+    /// so we iterate 0..chunk_count-1 and concatenate. Best-effort and side-effect free: any NACK/timeout/short or
+    /// inconsistent reply (e.g. the board has no snapshot, or a sample-size skew) is swallowed as "no snapshot"
+    /// (null) so it can never break the fault record it is meant to enrich.</summary>
+    public async Task<FaultSnapshot?> GetFaultSnapshotAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var samples = new List<FaultSnapshotSample>();
+            FaultSnapshotCodec.ChunkHeader first = default;
+            var chunkCount = 1; // learned from the first reply
+
+            for (var chunkIndex = 0; chunkIndex < chunkCount && chunkIndex < MaxSnapshotChunks; chunkIndex++)
+            {
+                var resp = await RequestAsync(CmdGetFaultSnapshot, [(byte)chunkIndex], ct);
+                if (resp.Length < FaultSnapshotCodec.HeaderSize) return null; // short/garbage ⇒ no snapshot
+
+                var header = FaultSnapshotCodec.DecodeHeader(resp);
+                if (chunkIndex == 0)
+                {
+                    first = header;
+                    if (header.TotalSamples == 0 || header.ChunkCount == 0) return null; // board has none
+                    if (header.SampleSize != FaultSnapshotCodec.SampleSize)
+                    {
+                        // A different sample size means a layout this decoder can't read — refuse rather than
+                        // emit garbage engineering values. Lock-step with the firmware keeps this at 32.
+                        _logger.LogWarning("RS422: snapshot com sample_size {Size} (esperado {Expected}); ignorando.",
+                            header.SampleSize, FaultSnapshotCodec.SampleSize);
+                        return null;
+                    }
+                    chunkCount = header.ChunkCount;
+                }
+
+                var body = resp.AsSpan(FaultSnapshotCodec.HeaderSize);
+                for (var off = 0; off + FaultSnapshotCodec.SampleSize <= body.Length; off += FaultSnapshotCodec.SampleSize)
+                    samples.Add(FaultSnapshotCodec.DecodeSample(body.Slice(off, FaultSnapshotCodec.SampleSize)));
+            }
+
+            if (samples.Count == 0) return null;
+            return new FaultSnapshot(
+                FaultSnapshotCodec.SampleIntervalMs, first.TriggerIndex, first.FaultCode, first.BaseMs, samples);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Best-effort enrichment: a board that NACKs (no snapshot) or a link that times out must not
+            // surface as a failure — log and report "no snapshot".
+            _logger.LogWarning(ex, "RS422: falha ao baixar o snapshot de falha da placa.");
+            return null;
+        }
     }
 
 

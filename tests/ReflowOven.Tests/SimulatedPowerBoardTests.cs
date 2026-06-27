@@ -50,6 +50,34 @@ public class SimulatedPowerBoardTests
         var r = await board.ReadAsync();
         Assert.Null(r.FaultCode);
     }
+
+    [Fact]
+    public async Task Fault_snapshot_is_a_plausible_ramp_with_a_spike_at_the_trigger()
+    {
+        var board = new SimulatedPowerBoard(new FixedClock(DateTimeOffset.UnixEpoch));
+        var snap = await board.GetFaultSnapshotAsync();
+
+        Assert.NotNull(snap);
+        Assert.Equal(10, snap!.SampleIntervalMs);              // one sample every 10 ms
+        Assert.InRange(snap.TriggerIndex, 0, snap.Samples.Count - 1);
+        Assert.True(snap.Samples.Count > 1);
+
+        var trigger = snap.Samples[snap.TriggerIndex];
+        var before = snap.Samples[snap.TriggerIndex - 20];
+        // The excursion: the oven overshoots its setpoint at the trigger, and the fault flags latch from there on.
+        Assert.True(trigger.OvenTempC > trigger.SetpointC);
+        Assert.True(trigger.OvenTempC > before.OvenTempC);
+        Assert.Equal(0, before.FaultFlags);
+        Assert.NotEqual(0, trigger.FaultFlags);
+
+        // Engineering units stay in plausible ranges (decoded, not raw).
+        Assert.All(snap.Samples, x =>
+        {
+            Assert.InRange(x.OvenTempC, -10, 330);
+            Assert.InRange(x.VddaV, 3.0, 3.6);
+            Assert.InRange(x.DutyBoardPct, 0, 100);
+        });
+    }
 }
 
 /// <summary>The diagnostics <c>fault</c> field is a frontend contract: a latched E-code maps through the

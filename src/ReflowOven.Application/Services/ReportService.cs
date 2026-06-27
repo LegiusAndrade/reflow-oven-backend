@@ -71,7 +71,8 @@ public sealed class ReportService(IAppDbContext db)
         return new ErrorDetailDto(
             e.Id, e.At, e.FaultTypeCode, e.Severity, e.Message, e.UserId, e.UserName, e.ProgramId, e.ProgramName,
             e.OvenTemp, e.PcbTemp, e.StartAt, e.EndAt, e.InputVoltage, e.OutputVoltage, snap,
-            e.Events.OrderBy(v => v.OrderIndex).ThenBy(v => v.At).Select(MapEvent).ToList());
+            e.Events.OrderBy(v => v.OrderIndex).ThenBy(v => v.At).Select(MapEvent).ToList(),
+            MapBoardSnapshot(e.BoardSnapshot));
     }
 
     // --- changes --------------------------------------------------------------------------
@@ -228,4 +229,13 @@ public sealed class ReportService(IAppDbContext db)
 
     private static FailureSnapshotDto MapSnapshot(FailureSnapshot s) =>
         new(s.DurationSec, (s.Series ?? []).Select(sr => new SnapshotSeriesDto(sr.Name, sr.Unit, sr.Color, sr.Values)).ToList());
+
+    private static BoardFaultSnapshotDto? MapBoardSnapshot(BoardFaultSnapshot? s) =>
+        s is null ? null : new BoardFaultSnapshotDto(
+            s.SampleIntervalMs, s.TriggerIndex, s.FaultCode,
+            (s.Samples ?? []).Select(x => new BoardFaultSampleDto(
+                x.OvenTempC, x.BoardTempC, x.VbusV, x.VregV, x.PdV, x.CurrentA,
+                x.FanIntakeRpm, x.FanExhaustRpm, x.FanBoardRpm,
+                x.DutyIntakePct, x.DutyExhaustPct, x.DutyBoardPct,
+                x.McuTempC, x.VddaV, x.FaultFlags, x.SetpointC, x.BuckDutyPct, x.PowerW)).ToList());
 }

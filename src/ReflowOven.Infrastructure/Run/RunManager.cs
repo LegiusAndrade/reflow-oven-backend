@@ -339,6 +339,18 @@ public sealed class RunManager : IRunManager
                     Snapshot = BuildTrace(run, duration),
                     Events = [new LogEvent { At = endedAt, Kind = LogEventKind.Falha, Message = f.Message, OrderIndex = 0 }],
                 };
+                // Best-effort: pull the board's fault-snapshot buffer (GET_FAULT_SNAPSHOT) and attach it to the
+                // error as jsonb. A failed/empty download (the dead board in an E-130, a board with no snapshot,
+                // a link timeout) must never stop the Falha from being recorded — log and move on.
+                try
+                {
+                    if (await _board.GetFaultSnapshotAsync(ct) is { } snap)
+                        error.BoardSnapshot = MapBoardSnapshot(snap);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Falha ao baixar o snapshot da placa para o erro {Code} (segue o registro).", f.Code);
+                }
                 db.Errors.Add(error);
                 report.LinkedErrorId = error.Id;
             }
@@ -444,6 +456,35 @@ public sealed class RunManager : IRunManager
             ],
         };
     }
+
+    /// <summary>Map the board's downloaded fault snapshot (engineering units) to its persisted jsonb shape.</summary>
+    private static BoardFaultSnapshot MapBoardSnapshot(FaultSnapshot s) => new()
+    {
+        SampleIntervalMs = s.SampleIntervalMs,
+        TriggerIndex = s.TriggerIndex,
+        FaultCode = s.FaultCode,
+        Samples = s.Samples.Select(x => new BoardFaultSample
+        {
+            OvenTempC = x.OvenTempC,
+            BoardTempC = x.BoardTempC,
+            VbusV = x.VbusV,
+            VregV = x.VregV,
+            PdV = x.PdV,
+            CurrentA = x.CurrentA,
+            FanIntakeRpm = x.FanIntakeRpm,
+            FanExhaustRpm = x.FanExhaustRpm,
+            FanBoardRpm = x.FanBoardRpm,
+            DutyIntakePct = x.DutyIntakePct,
+            DutyExhaustPct = x.DutyExhaustPct,
+            DutyBoardPct = x.DutyBoardPct,
+            McuTempC = x.McuTempC,
+            VddaV = x.VddaV,
+            FaultFlags = x.FaultFlags,
+            SetpointC = x.SetpointC,
+            BuckDutyPct = x.BuckDutyPct,
+            PowerW = x.PowerW,
+        }).ToList(),
+    };
 
     /// <summary>Evenly-spaced indices into a <paramref name="count"/>-length series, capped at
     /// <paramref name="max"/> and always including the first and last sample.</summary>

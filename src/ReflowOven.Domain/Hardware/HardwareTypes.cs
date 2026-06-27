@@ -66,6 +66,46 @@ public readonly record struct BoardIdentity(
     string ControlSerial,
     int ControlHours);
 
+/// <summary>
+/// One 32-byte sample of a board fault snapshot (GET_FAULT_SNAPSHOT, 0x10), decoded from the packed wire
+/// layout into engineering units: temperatures in °C, the rails in V, current in A, fans in RPM, duties in %
+/// and power in W. The board captures one sample every <see cref="FaultSnapshot.SampleIntervalMs"/> (10 ms)
+/// around a protection-fault trigger. <see cref="FaultFlags"/> is the raw firmware fault bitfield at that sample.
+/// </summary>
+public readonly record struct FaultSnapshotSample(
+    double OvenTempC,
+    double BoardTempC,
+    double VbusV,
+    double VregV,
+    double PdV,
+    double CurrentA,
+    int FanIntakeRpm,
+    int FanExhaustRpm,
+    int FanBoardRpm,
+    int DutyIntakePct,
+    int DutyExhaustPct,
+    int DutyBoardPct,
+    double McuTempC,
+    double VddaV,
+    int FaultFlags,
+    double SetpointC,
+    int BuckDutyPct,
+    int PowerW);
+
+/// <summary>
+/// The telemetry ring the power board captured around its last protection fault, downloaded over RS422 in
+/// chunks (GET_FAULT_SNAPSHOT, 0x10) and decoded to engineering units. <see cref="TriggerIndex"/> is the sample
+/// index at which the fault tripped; consecutive samples are <see cref="SampleIntervalMs"/> (10 ms) apart;
+/// <see cref="FaultCode"/> is the firmware fault code (u16) the board latched. Becomes the jsonb snapshot
+/// attached to the run's <c>ErrorLogEntry</c>.
+/// </summary>
+public sealed record FaultSnapshot(
+    int SampleIntervalMs,
+    int TriggerIndex,
+    int FaultCode,
+    long BaseMs,
+    IReadOnlyList<FaultSnapshotSample> Samples);
+
 /// <summary>Op for the AUTOTUNE command (0x0D): start the relay tune, cancel it, or poll its state.</summary>
 public enum AutoTuneOp { Start = 0, Cancel = 1, Query = 2 }
 

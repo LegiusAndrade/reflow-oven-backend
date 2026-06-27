@@ -46,7 +46,54 @@ public class ErrorLogEntry
     /// <summary>Multi-channel snapshot around the fault. Owned/jsonb.</summary>
     public FailureSnapshot Snapshot { get; set; } = new();
 
+    /// <summary>The power board's raw fault-snapshot telemetry buffer (GET_FAULT_SNAPSHOT, 0x10), downloaded
+    /// around the trigger and stored verbatim in engineering units. Null when the board offered none or the
+    /// download failed (best-effort). Owned/jsonb.</summary>
+    public BoardFaultSnapshot? BoardSnapshot { get; set; }
+
     public List<LogEvent> Events { get; set; } = new();
+}
+
+/// <summary>
+/// The telemetry ring the power board captured around a protection fault, downloaded over RS422
+/// (GET_FAULT_SNAPSHOT, 0x10) and persisted verbatim as jsonb. Distinct from the presentational
+/// <see cref="FailureSnapshot"/> (the fixed-width chart series): this is the raw per-10 ms board buffer.
+/// </summary>
+public class BoardFaultSnapshot
+{
+    /// <summary>Spacing between samples in milliseconds (10 ms on the board).</summary>
+    public int SampleIntervalMs { get; set; } = 10;
+
+    /// <summary>Index into <see cref="Samples"/> at which the fault tripped.</summary>
+    public int TriggerIndex { get; set; }
+
+    /// <summary>The firmware fault code (u16) the board latched.</summary>
+    public int FaultCode { get; set; }
+
+    public List<BoardFaultSample> Samples { get; set; } = new();
+}
+
+/// <summary>One sample of a <see cref="BoardFaultSnapshot"/> in engineering units (°C, V, A, RPM, %, W). Owned/jsonb.</summary>
+public class BoardFaultSample
+{
+    public double OvenTempC { get; set; }
+    public double BoardTempC { get; set; }
+    public double VbusV { get; set; }
+    public double VregV { get; set; }
+    public double PdV { get; set; }
+    public double CurrentA { get; set; }
+    public int FanIntakeRpm { get; set; }
+    public int FanExhaustRpm { get; set; }
+    public int FanBoardRpm { get; set; }
+    public int DutyIntakePct { get; set; }
+    public int DutyExhaustPct { get; set; }
+    public int DutyBoardPct { get; set; }
+    public double McuTempC { get; set; }
+    public double VddaV { get; set; }
+    public int FaultFlags { get; set; }
+    public double SetpointC { get; set; }
+    public int BuckDutyPct { get; set; }
+    public int PowerW { get; set; }
 }
 
 /// <summary>The fixed-width multi-signal trace captured around a fault. Owned/jsonb.</summary>

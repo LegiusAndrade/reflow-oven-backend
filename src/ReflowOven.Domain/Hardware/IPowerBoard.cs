@@ -45,6 +45,13 @@ public interface IPowerBoard
     /// <summary>Versions / serials / hour-meters for the Informação screen.</summary>
     Task<BoardIdentity> GetIdentityAsync(CancellationToken ct = default);
 
+    /// <summary>GET_FAULT_SNAPSHOT (0x10): download the telemetry buffer the board recorded around its last
+    /// protection fault — a chunked download (the host asks per <c>chunk_index</c>; the board replies with a
+    /// header + that chunk's 32-byte samples) reassembled and decoded to engineering units. Returns null when the
+    /// board has no snapshot to offer or the link can't deliver one. Best-effort: meant to enrich a recorded
+    /// fault, so the caller treats any failure as "no snapshot" rather than failing the fault record.</summary>
+    Task<FaultSnapshot?> GetFaultSnapshotAsync(CancellationToken ct = default);
+
     /// <summary>Raised when the board reports a fault (over-temp, over-current, RS422 loss, …).</summary>
     event EventHandler<FaultRaised>? FaultRaised;
 

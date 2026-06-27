@@ -83,6 +83,70 @@ public sealed class RunManagerFaultTests
         Assert.Empty(await db.Errors.ToListAsync());
     }
 
+    [Fact]
+    public async Task BoardFault_attaches_the_downloaded_fault_snapshot_to_the_error_and_detail_dto()
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 6, 27, 8, 0, 0, TimeSpan.Zero));
+        var sp = BuildProvider(clock);
+        const string programId = "p-snap-test";
+        await SeedProgramAsync(sp, programId);
+
+        var board = new FakeBoard
+        {
+            Snapshot = new FaultSnapshot(SampleIntervalMs: 10, TriggerIndex: 1, FaultCode: 0x0102, BaseMs: 500,
+            [
+                new FaultSnapshotSample(25, 30, 0, 12, 20, 0, 1000, 1000, 800, 0, 0, 0, 40, 3.3, 0, 25, 0, 0),
+                new FaultSnapshotSample(260, 70, 160, 12, 20, 38, 5000, 5000, 4000, 100, 95, 90, 50, 3.3, 1 << 2, 230, 88, 6080),
+                new FaultSnapshotSample(255, 69, 158, 12, 20, 35, 5000, 5000, 4000, 100, 95, 90, 50, 3.3, 1 << 2, 230, 86, 5530),
+            ]),
+        };
+        var manager = NewManager(sp, board, clock);
+
+        await manager.StartAsync(programId, userId: null, userName: null);
+        board.RaiseFault("E-101");
+        await manager.TickAsync();
+
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ReflowDbContext>();
+        var error = Assert.Single(await db.Errors.ToListAsync());
+        Assert.NotNull(error.BoardSnapshot);
+        Assert.Equal(10, error.BoardSnapshot!.SampleIntervalMs);
+        Assert.Equal(1, error.BoardSnapshot.TriggerIndex);
+        Assert.Equal(0x0102, error.BoardSnapshot.FaultCode);
+        Assert.Equal(3, error.BoardSnapshot.Samples.Count);
+        Assert.Equal(160, error.BoardSnapshot.Samples[1].VbusV); // engineering units persisted verbatim
+
+        // GET /api/errors/{id} surfaces it on the detail DTO.
+        var dto = await new ReportService(db).ErrorAsync(error.Id);
+        Assert.NotNull(dto.BoardSnapshot);
+        Assert.Equal(1, dto.BoardSnapshot!.TriggerIndex);
+        Assert.Equal(3, dto.BoardSnapshot.Samples.Count);
+        Assert.Equal(38, dto.BoardSnapshot.Samples[1].CurrentA);
+    }
+
+    [Fact]
+    public async Task BoardFault_is_recorded_even_when_the_snapshot_download_fails()
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 6, 27, 8, 0, 0, TimeSpan.Zero));
+        var sp = BuildProvider(clock);
+        const string programId = "p-snap-fail";
+        await SeedProgramAsync(sp, programId);
+
+        // The board throws on the snapshot download (a dead link / no snapshot): the Falha must still record.
+        var board = new FakeBoard { SnapshotThrows = new TimeoutException("RS422 sem resposta") };
+        var manager = NewManager(sp, board, clock);
+
+        await manager.StartAsync(programId, userId: null, userName: null);
+        board.RaiseFault("E-110");
+        await manager.TickAsync();
+
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ReflowDbContext>();
+        var error = Assert.Single(await db.Errors.ToListAsync());
+        Assert.Equal("E-110", error.FaultTypeCode);
+        Assert.Null(error.BoardSnapshot); // best-effort: no snapshot, but the error is intact
+    }
+
     private static RunManager NewManager(IServiceProvider sp, IPowerBoard board, IClock clock) =>
         new(sp.GetRequiredService<IServiceScopeFactory>(), board,
             new NullTelemetrySink(), new NullSystemLogSink(), new NullNotificationSink(), clock,
@@ -138,7 +202,15 @@ public sealed class RunManagerFaultTests
         public event EventHandler? ConfigRequested { add { } remove { } }
         public bool IsConnected => true;
 
+        /// <summary>The fault snapshot the board returns from <see cref="GetFaultSnapshotAsync"/>. Default null
+        /// (no snapshot); a test can set one to exercise the attach-to-error path, or a throwing one for best-effort.</summary>
+        public FaultSnapshot? Snapshot { get; set; }
+        public Exception? SnapshotThrows { get; set; }
+
         public void RaiseFault(string code) => FaultRaised?.Invoke(this, new FaultRaised(code, DateTimeOffset.UtcNow));
+
+        public Task<FaultSnapshot?> GetFaultSnapshotAsync(CancellationToken ct = default) =>
+            SnapshotThrows is { } ex ? Task.FromException<FaultSnapshot?>(ex) : Task.FromResult(Snapshot);
 
         public Task<SensorReadings> ReadAsync(CancellationToken ct = default) => Task.FromResult(default(SensorReadings));
         public Task StartProgramAsync(IReadOnlyList<ProfileSegment> segments, IReadOnlyList<ProfilePoint> profile, CancellationToken ct = default) => Task.CompletedTask;

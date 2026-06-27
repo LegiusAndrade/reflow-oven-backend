@@ -143,6 +143,12 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
                 s.ToJson();
                 s.OwnsMany(z => z.Series);
             });
+            // The raw board fault-snapshot buffer (GET_FAULT_SNAPSHOT) — optional, stored as jsonb alongside.
+            e.OwnsOne(x => x.BoardSnapshot, s =>
+            {
+                s.ToJson();
+                s.OwnsMany(z => z.Samples);
+            });
             e.HasOne(x => x.FaultType).WithMany(f => f.Errors).HasForeignKey(x => x.FaultTypeCode).OnDelete(DeleteBehavior.Restrict);
             e.HasMany(x => x.Events).WithOne(v => v.ErrorLogEntry!).HasForeignKey(v => v.ErrorLogEntryId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.At);

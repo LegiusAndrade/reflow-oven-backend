@@ -75,6 +75,48 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
         return Task.CompletedTask;
     }
 
+    /// <summary>A synthetic but plausible fault snapshot for dev/test: a steady thermal/electrical ramp with a
+    /// sharp excursion at the trigger (oven overshoot + over-current spike), one sample every 10 ms. The real
+    /// board records this around a protection fault; the simulator never faults on its own, so this lets the
+    /// download + persistence path be exercised without hardware. Already in engineering units.</summary>
+    public Task<FaultSnapshot?> GetFaultSnapshotAsync(CancellationToken ct = default)
+    {
+        const int total = 300, trigger = 200, overTempFlag = 1 << 2;
+        var samples = new List<FaultSnapshotSample>(total);
+        for (var i = 0; i < total; i++)
+        {
+            var frac = i / (total - 1.0);
+            var bump = Math.Exp(-Math.Pow((i - trigger) / 8.0, 2)); // narrow spike centred on the trigger
+            var setpoint = 30 + 215 * frac;                         // the controller's intended ramp
+            var oven = setpoint + 48 * bump;                        // measured overshoots into the fault
+            var board = 28 + oven * 0.16;
+            var vbus = 12 + 150 * frac;
+            var current = 1 + 13 * frac + 26 * bump;                // over-current excursion at the fault
+            var post = i >= trigger;
+            samples.Add(new FaultSnapshotSample(
+                OvenTempC: Math.Round(oven, 1),
+                BoardTempC: Math.Round(board, 1),
+                VbusV: Math.Round(vbus, 2),
+                VregV: 12.0,
+                PdV: 20.0,
+                CurrentA: Math.Round(current, 2),
+                FanIntakeRpm: (int)(1000 + 4000 * frac),
+                FanExhaustRpm: (int)(1000 + 3800 * frac),
+                FanBoardRpm: (int)(800 + 3200 * frac),
+                DutyIntakePct: (int)(100 * frac),
+                DutyExhaustPct: (int)(95 * frac),
+                DutyBoardPct: (int)(90 * frac),
+                McuTempC: Math.Round(40 + 10 * frac, 1),
+                VddaV: 3.3,
+                FaultFlags: post ? overTempFlag : 0,
+                SetpointC: Math.Round(setpoint, 1),
+                BuckDutyPct: (int)(90 * frac),
+                PowerW: (int)Math.Round(vbus * current)));
+        }
+        return Task.FromResult<FaultSnapshot?>(
+            new FaultSnapshot(FaultSnapshotCodec.SampleIntervalMs, trigger, overTempFlag, BaseMs: 0, samples));
+    }
+
     public Task ApplyCalibrationAsync(Calibration calibration, CancellationToken ct = default) => Task.CompletedTask;
 
     public Task ApplyControlConfigAsync(Settings settings, CancellationToken ct = default) => Task.CompletedTask;
