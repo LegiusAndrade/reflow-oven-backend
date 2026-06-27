@@ -162,10 +162,13 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             await db.LogEvents.ExecuteDeleteAsync(ct);
             await db.Executions.ExecuteDeleteAsync(ct);
             await db.Errors.ExecuteDeleteAsync(ct);
+            await db.AutotuneRuns.ExecuteDeleteAsync(ct);
             await db.Changes.ExecuteDeleteAsync(ct);
             await db.SystemLog.ExecuteDeleteAsync(ct);
             await db.OperationLog.ExecuteDeleteAsync(ct);
             // IgnoreQueryFilters so the reset also wipes soft-deleted rows (the global filters hide them otherwise).
+            // The notification feed is soft-deletable too, so clear the live AND the trashed (cleared) entries.
+            await db.Notifications.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
             await db.Favorites.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
             await db.PasswordResetTokens.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
             await db.UserActivityStats.IgnoreQueryFilters().ExecuteDeleteAsync(ct);

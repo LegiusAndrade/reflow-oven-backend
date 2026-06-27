@@ -86,6 +86,24 @@ if (!builder.Environment.IsDevelopment() &&
         "Master:Password ainda é o padrão de dev. Defina um segredo real via Master__Password (env) fora de Development.");
 }
 
+// Same fail-fast for the rest of the well-known dev credentials: a production deploy must not boot with a
+// working login on a placeholder password. The seeded Admin and Regular share the dev default
+// (Defaults.DefaultDevPassword = "reflow1234"); the hidden calibration technician (a config-only backdoor,
+// not a User row) has its own. Override each via env (Admin__Password / Regular__Password / Technician__Password).
+const string devTechnicianPasswordPlaceholder = "calibra";
+if (!builder.Environment.IsDevelopment())
+{
+    if (string.Equals(builder.Configuration["Admin:Password"], Defaults.DefaultDevPassword, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Admin:Password ainda é o padrão de dev. Defina um segredo real via Admin__Password (env) fora de Development.");
+    if (string.Equals(builder.Configuration["Regular:Password"], Defaults.DefaultDevPassword, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Regular:Password ainda é o padrão de dev. Defina um segredo real via Regular__Password (env) fora de Development.");
+    if (string.Equals(builder.Configuration["Technician:Password"], devTechnicianPasswordPlaceholder, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Technician:Password ainda é o padrão de dev. Defina um segredo real via Technician__Password (env) fora de Development.");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

@@ -1,9 +1,11 @@
 namespace ReflowOven.Application.Services;
 
 /// <summary>
-/// Backs the notification feed (TopBar bell + Notificações screen): list / unread-count / mark-read,
-/// plus <see cref="RaiseAsync"/> used by the run loop (execution finished) and the system monitor
-/// (central server up/down, update available). Feed entries are device-wide, not per-user.
+/// Backs the notification feed (TopBar bell + Notificações screen): list / unread-count / mark-read / clear,
+/// plus the Master trash (list-deleted / restore / purge). Feed entries are device-wide, not per-user; they
+/// are appended by the run loop (execution finished) and the system monitor (central server up/down, update
+/// available, disk/power alerts), each of which batches the row into its own unit of work and pushes it live
+/// via <see cref="INotificationSink"/>.
 /// </summary>
 public sealed class NotificationService(IAppDbContext db, IClock clock, ICurrentUser current)
 {
@@ -33,23 +35,6 @@ public sealed class NotificationService(IAppDbContext db, IClock clock, ICurrent
     /// <summary>Marks every unread entry as read (called when the user leaves the Notificações screen).</summary>
     public Task<int> MarkAllReadAsync(CancellationToken ct = default) =>
         db.Notifications.Where(n => !n.Read).ExecuteUpdateAsync(s => s.SetProperty(n => n.Read, true), ct);
-
-    /// <summary>Appends a feed entry and returns it. Best-effort callers should swallow failures.</summary>
-    public async Task<NotificationDto> RaiseAsync(NotificationFeedKind kind, string title, string message, CancellationToken ct = default)
-    {
-        var n = new Notification
-        {
-            Id = Guid.NewGuid(),
-            At = clock.UtcNow,
-            Kind = kind,
-            Title = title,
-            Message = message,
-            Read = false,
-        };
-        db.Notifications.Add(n);
-        await db.SaveChangesAsync(ct);
-        return NotificationDto.From(n);
-    }
 
     /// <summary>Soft-delete the visible feed (hides it); only the Master can list/restore/purge it afterwards.</summary>
     public Task<int> ClearAsync(CancellationToken ct = default) =>
