@@ -483,3 +483,8 @@ $RECYCLE.BIN/
 
 # Claude Code local config
 .claude/
+
+# Claude Code: ignore local state, version shared agents/skills
+.claude/*
+!.claude/agents/
+!.claude/skills/
