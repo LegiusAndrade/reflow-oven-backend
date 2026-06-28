@@ -5,18 +5,16 @@ O histórico completo do que já foi entregue está em **`DONE.md`**. Tarefas do
 
 ## Em aberto
 
-- **🔁 Instabilidade do `:5248` (factory reset) — parado a pedido (2026-06-17).** Num teste o backend **caiu**
-  (`:5248` → 000) ao acionar `POST /api/maintenance/factory-reset`. Conferido em 2026-06-17: o
-  `FactoryResetAsync` **não reinicia** o serviço (sem reboot/restart no fluxo) → o "responder antes de
-  reiniciar" virou **moot**, o controller devolve 204 normal. O fio solto é a **queda do processo** (não
-  reproduzida): os ~14 `ExecuteDeleteAsync` rodam em sequência sem transação — candidato a envolver numa
-  transação e checar. Investigação adiada.
+- **🔁 Instabilidade do `:5248` (factory reset) — só a queda não reproduzida segue em aberto.** Num teste o
+  backend **caiu** (`:5248` → 000) ao acionar `POST /api/maintenance/factory-reset`. Já endereçado o que dava
+  pra endereçar: o `FactoryResetAsync` **não reinicia** o serviço (sem reboot/restart no fluxo → o "responder
+  antes de reiniciar" é **moot**, o controller devolve 204 normal) e o **candidato** — os ~14 `ExecuteDeleteAsync`
+  rodando em sequência **sem transação** — foi **corrigido** (factory-reset/cleanup agora rodam numa transação;
+  ver `DONE.md`). O fio solto que resta é só a **queda do processo em si**, **não reproduzida** desde então —
+  reabrir se voltar a ocorrer.
 
-- **Autotune: tela do front.** O backend está pronto (`/api/autotune/*` — histórico paginado + start/cancel/
-  apply/dismiss, CalibrationOnly pra disparar); falta a **tela dedicada** (disparar/cancelar com alvo, progresso
-  ao vivo, histórico, aplicar-com-confirmação). Registrada em `../reflow-oven-front/TODO.md`. *(time do front)*
 - **#9 — Log de Operação: tela do front.** O backend está pronto e Master-only; falta o front montar o
   visualizador contra o contrato (`GET /api/operation-log`). *(time do front)*
 
-- **Ops / Lucas.** `git push` da `develop` (o `origin/develop` já está em dia, exceto este commit de docs); segredos reais de
+- **Ops / Lucas.** `git push` da `develop` (rotineiro, feito a cada commit); segredos reais de
   produção (`Jwt`/`Master`/`Admin`/`Regular`) via ambiente; aplicar as migrations no deploy.

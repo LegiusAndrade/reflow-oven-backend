@@ -3,6 +3,45 @@
 Tarefas **em aberto** estão em `TODO.md`. As seções abaixo são todas **concluídas** — alguns
 cabeçalhos históricos dizem "Pendentes", mas cada item traz a nota ✅/"Feito:" do que foi entregue.
 
+## Revisão geral + wiring de fault da placa (2026-06-27)
+
+Rodada de revisão do backend (achados de uma passada geral) + o fluxo de fault da placa fim-a-fim. As
+contrapartes no front (banner de fault + ação de limpar, gráfico caixa-preta no relatório de erro, rótulo
+do VREG, **tela de Autotune**) também foram entregues nesta leva.
+
+- ✅ **Transação no factory-reset/cleanup.** Os ~14 `ExecuteDeleteAsync` do `FactoryResetAsync`/`CleanupAsync`
+  rodavam em sequência **auto-commitando**, sem transação — agora envolvidos numa única transação
+  (`IAppDbContext.BeginTransactionAsync`, atômica no Postgres; no-op no provider InMemory dos testes via guarda
+  `IsRelational`). Era o **candidato** do item de instabilidade do `:5248`; o que resta lá é só a **queda do
+  processo não reproduzida** (segue em `TODO.md`). O factory-reset passou a **limpar também** notificações e
+  histórico de autotune no wipe.
+- ✅ **Save de config/calibração best-effort após o commit.** O save de Configuração/Calibração devolvia **500**
+  quando o push pra placa estourava **depois** do commit no BD (estado já persistido, mas erro pro usuário) — o
+  push virou **best-effort** (`try/catch` + warning), no mesmo padrão do apply de rede.
+- ✅ **Change-log cobrindo máscara/gateway/DNS.** O diff de Alterações da Rede **ignorava** edições de máscara,
+  gateway e DNS (primário e secundário) — os quatro campos entraram no diff.
+- ✅ **Fail-fast de segredos cobrindo as seed creds.** O `Program.cs` já abortava fora de Development com a
+  `Jwt:SigningKey` placeholder; a guarda passou a cobrir também as credenciais semeadas
+  (`Master`/`Admin`/`Regular`) deixadas no valor de dev — não sobe em produção com segredo-placeholder.
+- ✅ **Remoção de dead code.** Apagados o `SystemLogService` (classe inteira + registro no DI) e o
+  `NotificationService.RaiseAsync`, ambos sem chamador.
+- ✅ **Fault-wiring do `RunManager` (`FaultRaised`).** O `RunManager` **nunca assinava** `IPowerBoard.FaultRaised`,
+  então um fault real de proteção da placa (sobretemperatura E-101, sobrecorrente E-110, …) — que **mantém** o
+  link RS422 — disparava no vazio durante a run, e ela era gravada como **Concluído** (pico falso, sem
+  `ErrorLogEntry`, sem notificação). Agora assina como o `AutotuneManager`: o handler da thread de RX guarda o
+  fault sob lock e o `TickAsync` (serializado pela gate) o consome e finaliza a run como **Falha** com o
+  E-code/severidade catalogados, espelhando o caminho de E-130 (perda de comunicação). +2 testes de regressão.
+- ✅ **ACK_FAULT + `fault` no tick de diagnóstico.** Reconhecer um fault **latcheado** da placa (ACK_FAULT) para
+  limpá-lo, e expor o fault corrente no tick de diagnóstico (1 Hz) — o front mostra o banner e a ação de limpar.
+- ✅ **Fault-snapshot (download + jsonb no `ErrorLogEntry`).** Baixar o snapshot (caixa-preta) do fault da placa e
+  persisti-lo como **jsonb** anexado ao relatório de erro, reusando o `FailureSnapshot` já existente.
+- ✅ **Semântica do VREG corrigida (= tensão de saída do buck, centivolts).** O campo `vreg` do status da placa
+  (firmware `vreg_cv`) é a **saída regulada do buck** que alimenta o aquecedor (0–180 V, centivolts de AT, mesmo
+  divisor do VBUS), **não** um trilho de controle de baixa tensão em mV. Corrigidos os comentários enganosos do
+  `Rs422PowerBoard` (`vreg_mv`→`vreg_cv`, `vbus_mv`→`vbus_cv`, escala em centivolts, `DecodeStatus` usando
+  `CentivoltsToVolts`/100 como o VBUS, nunca /1000) e o snapshot sintético do `SimulatedPowerBoard`, que agora
+  acompanha a rampa (era fixo em 12,0 V).
+
 ## Autotune do PID (relé) + config pull da placa (2026-06-17)
 
 - ✅ **#7 (firmware) — AUTOTUNE (RS422 0x0D).** Auto-tune por relé Åström-Hägglund exposto fim-a-fim:
@@ -22,7 +61,8 @@ cabeçalhos históricos dizem "Pendentes", mas cada item traz a nota ✅/"Feito:
   Lucas, 2026-06-17): o `apply` grava em Settings + empurra a config.
 - ✅ Simulador faz um tune plausível (~12 s) pro fluxo de dev rodar sem hardware. Build + 58 testes verdes.
 
-**Pendente (front):** a **tela de Autotune** (registrada no `../reflow-oven-front/TODO.md`).
+- ✅ **Tela de Autotune (front) — entregue (2026-06-27).** `ConfiguracoesScreen/AutotuneTab.tsx`: disparar/cancelar
+  com alvo, progresso ao vivo, histórico paginado e aplicar-com-confirmação, consumindo `/api/autotune/*`.
 
 ## RS422 / hardware real + acabamentos (2026-06-15 → 06-17)
 
