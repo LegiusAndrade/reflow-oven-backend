@@ -596,12 +596,16 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     /// <summary>Decode the 35-byte status push into <see cref="SensorReadings"/> and edge-trigger faults.
     /// SensorReadings only carries the channels the frontend chart shows today; the richer status fields
     /// (VREG/PD, the three fans + duties, MCU health, the fault bitfield) await the SensorReadings expansion
-    /// noted in TODO.md.</summary>
+    /// noted in TODO.md. When VREG is wired up it is the regulated buck OUTPUT voltage (HV centivolts, like
+    /// VBUS), so it MUST be scaled with <see cref="CentivoltsToVolts"/> (÷100) — never ÷1000; it is not a
+    /// millivolt rail. Only PD/VDDA are genuine low-voltage mV rails.</summary>
     private void DecodeStatus(ReadOnlySpan<byte> p)
     {
-        // state:u8, fault_code:u16, fault_flags:u16, oven_x10:i16, board_x10:i16, vbus_mv:u16, vreg_mv:u16,
+        // state:u8, fault_code:u16, fault_flags:u16, oven_x10:i16, board_x10:i16, vbus_cv:u16, vreg_cv:u16,
         // pd_mv:u16, current_ma:i16, fan_intake:u16, fan_exhaust:u16, fan_board:u16, duty×3:u8, mcu_x10:i16,
         // vdda_mv:u16, reset_reason:u8, hours_min:u32.
+        // vbus_cv/vreg_cv are HV CENTIVOLTS (÷100 → V): vbus = input bus, vreg = the regulated buck OUTPUT
+        // feeding the heater (0–180 V; mV would overflow u16). pd_mv/vdda_mv are genuine mV rails (÷1000 → V).
         var faultCode = BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(1, 2));
         var faultFlags = BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(3, 2));
         var ovenC = BinaryPrimitives.ReadInt16LittleEndian(p.Slice(5, 2)) / 10.0;
@@ -689,9 +693,10 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     private static ushort ClampU16(double v) => (ushort)Math.Clamp(v, 0, ushort.MaxValue);
     private static short ClampI16(double v) => (short)Math.Clamp(v, short.MinValue, short.MaxValue);
 
-    // The 0–180 VDC bus is carried as CENTIVOLTS (×100, two decimals): 180.00 V ↔ 18000, which fits a u16
-    // (millivolts would overflow). vbus (status), the min/max-vbus config thresholds and the drive-output
-    // sweep all use this; the low-voltage rails (vreg/pd/vdda) stay in millivolts.
+    // The 0–180 VDC HV stage is carried as CENTIVOLTS (×100, two decimals): 180.00 V ↔ 18000, which fits a
+    // u16 (millivolts would overflow). BOTH HV rails use this — vbus (input bus) and vreg (the regulated buck
+    // OUTPUT feeding the heater) — as do the min/max-vbus config thresholds and the drive-output sweep. Only
+    // the genuine low-voltage rails (pd/vdda) stay in millivolts (÷1000).
     private static ushort VoltsToCentivolts(double volts) => ClampU16(volts * 100);
     private static double CentivoltsToVolts(int centivolts) => centivolts / 100.0;
 

@@ -91,13 +91,14 @@ public sealed class SimulatedPowerBoard(IClock clock) : IPowerBoard
             var oven = setpoint + 48 * bump;                        // measured overshoots into the fault
             var board = 28 + oven * 0.16;
             var vbus = 12 + 150 * frac;
+            var vreg = vbus * 0.72;                                 // buck OUTPUT feeding the heater: regulated below the bus, tracks the ramp (~9→117 V)
             var current = 1 + 13 * frac + 26 * bump;                // over-current excursion at the fault
             var post = i >= trigger;
             samples.Add(new FaultSnapshotSample(
                 OvenTempC: Math.Round(oven, 1),
                 BoardTempC: Math.Round(board, 1),
                 VbusV: Math.Round(vbus, 2),
-                VregV: 12.0,
+                VregV: Math.Round(vreg, 2),
                 PdV: 20.0,
                 CurrentA: Math.Round(current, 2),
                 FanIntakeRpm: (int)(1000 + 4000 * frac),
