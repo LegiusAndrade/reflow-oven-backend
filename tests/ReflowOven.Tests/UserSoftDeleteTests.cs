@@ -78,7 +78,16 @@ public sealed class UserSoftDeleteTests
         var current = new MasterUser();
         var audit = new AuditService(db, clock, current, NullLogger<AuditService>.Instance);
         return new UserService(db, new BcryptPasswordHasher(), clock, audit, current,
-            new StubEmailSender(NullLogger<StubEmailSender>.Instance), NullLogger<UserService>.Instance);
+            new StubEmailSender(NullLogger<StubEmailSender>.Instance), new NoopRevocations(),
+            NullLogger<UserService>.Instance);
+    }
+
+    // Revocation is covered by TokenRevocationTests; here it only needs to satisfy the dependency.
+    private sealed class NoopRevocations : ITokenRevocationList
+    {
+        public Task RevokeAsync(Guid userId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RevokeAllAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public bool IsRevoked(Guid userId, DateTimeOffset issuedAt) => false;
     }
 
     private sealed class FixedClock : IClock

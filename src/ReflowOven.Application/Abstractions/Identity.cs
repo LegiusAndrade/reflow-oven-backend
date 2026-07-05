@@ -36,6 +36,28 @@ public interface IJwtTokenService
     TokenResult CreateForCalibration();
 }
 
+/// <summary>
+/// JWT revocation for a single-device deploy. Tokens are stateless for hours, so a mutation that narrows
+/// what a user may do — deactivate, demote, delete, a self/admin/recovery password change — must actively
+/// cut the user's outstanding sessions instead of waiting for expiry. Those mutations call
+/// <see cref="RevokeAsync"/>; bearer/hub validation asks <see cref="IsRevoked"/> (a fast in-memory read on
+/// the hot path), rejecting any token issued before the user's latest revocation mark. A fresh login after
+/// the change mints a newer token, which passes. The mark is <b>persisted</b> (write-through on revoke,
+/// hydrated on startup) so the appliance's own <c>Restart=always</c> can't silently un-revoke a user.
+/// </summary>
+public interface ITokenRevocationList
+{
+    /// <summary>Invalidate every token issued to this user up to now (in-memory + durable store).</summary>
+    Task RevokeAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>Invalidate every token issued to ANY user up to now (factory reset / bulk user cleanup).</summary>
+    Task RevokeAllAsync(CancellationToken ct = default);
+
+    /// <summary>True when a token for <paramref name="userId"/> issued at <paramref name="issuedAt"/> is
+    /// no longer acceptable. Synchronous by design — it runs on every authenticated request/hub call.</summary>
+    bool IsRevoked(Guid userId, DateTimeOffset issuedAt);
+}
+
 /// <summary>Per-username login throttle (in-process): after repeated failures a name is locked for a
 /// cooldown, blunting brute-force and the BCrypt CPU-DoS. Keyed on the typed name (lower-cased), so a
 /// lockout reveals nothing about whether the account exists. Single-device deploy → in-memory is enough.</summary>

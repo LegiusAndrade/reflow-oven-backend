@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
@@ -61,20 +62,25 @@ builder.Services.AddControllers().AddJsonOptions(o =>
     o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
-builder.Services.AddSignalR().AddJsonProtocol(o =>
+// The hub filter re-checks JWT revocation on connect + every hub invocation (the bearer OnTokenValidated
+// below only fires at the handshake). Registered as a singleton it resolves once and reads the in-memory list.
+builder.Services.AddSingleton<RevocationHubFilter>();
+builder.Services.AddSignalR(o => o.AddFilter<RevocationHubFilter>()).AddJsonProtocol(o =>
     o.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // --- AuthN (JWT, also accepted via the SignalR query string) ----------------------------
 var jwt = builder.Configuration.GetSection(JwtOptions.Section).Get<JwtOptions>() ?? new JwtOptions();
 
-// Never run outside Development on the throwaway dev key (or an empty one): real deployments must
+// Never run outside Development on the throwaway dev key (or an empty/short one): real deployments must
 // supply a strong secret via environment variable (Jwt__SigningKey) or user-secrets — never hardcoded.
+// 32 bytes is the HS256 floor (RFC 7518 §3.2: key size ≥ hash size); anything shorter is brute-forceable.
 const string devSigningKeyPlaceholder = "dev-only-change-me-please-use-32-bytes-minimum!";
 if (!builder.Environment.IsDevelopment() &&
-    (string.IsNullOrWhiteSpace(jwt.SigningKey) || jwt.SigningKey == devSigningKeyPlaceholder))
+    (string.IsNullOrWhiteSpace(jwt.SigningKey) || jwt.SigningKey == devSigningKeyPlaceholder
+        || Encoding.UTF8.GetByteCount(jwt.SigningKey) < 32))
 {
     throw new InvalidOperationException(
-        "Jwt:SigningKey ausente ou padrão. Configure um segredo forte via Jwt__SigningKey (env) ou user-secrets fora de Development.");
+        "Jwt:SigningKey ausente, padrão ou curta (mínimo 32 bytes). Configure um segredo forte via Jwt__SigningKey (env) ou user-secrets fora de Development.");
 }
 
 // The dev Master password is a placeholder like the JWT key; never ship it outside Development.
@@ -126,6 +132,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var accessToken = ctx.Request.Query["access_token"];
                 if (!string.IsNullOrEmpty(accessToken) && ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
                     ctx.Token = accessToken;
+                return Task.CompletedTask;
+            },
+            // A JWT is otherwise valid for its whole 8 h lifetime: consult the revocation list so a user
+            // deactivated/demoted/deleted (or whose password changed) loses access NOW, not at expiry. This
+            // fires for every REST request and for a SignalR HANDSHAKE (new connection). An already-open hub
+            // push stream is re-checked per invocation by RevocationHubFilter; an in-flight server→client
+            // stream itself only drops on the next invoke or token expiry (see that filter's documented
+            // residual). Claim extraction (raw sub/iat, MapInboundClaims=false) is shared via TokenRevocationCheck.
+            OnTokenValidated = ctx =>
+            {
+                var revocations = ctx.HttpContext.RequestServices.GetRequiredService<ITokenRevocationList>();
+                if (TokenRevocationCheck.IsRevoked(ctx.Principal, revocations))
+                    ctx.Fail("Token revogado: o usuário foi alterado ou removido após a emissão.");
                 return Task.CompletedTask;
             },
         };
@@ -247,6 +266,10 @@ using (var scope = app.Services.CreateScope())
 
     // One-shot startup "auditoria" of the persisted/seeded data (users, programs, logs by type).
     await ReflowOven.Api.StartupDiagnostics.LogAuditAsync(sp.GetRequiredService<SystemService>(), app.Logger);
+
+    // Hydrate the JWT revocation watermarks from the durable table BEFORE the server accepts traffic, so a
+    // restart (the appliance runs Restart=always) never silently un-revokes a user whose 8 h token is still live.
+    await sp.GetRequiredService<TokenRevocationList>().LoadFromStoreAsync();
 }
 
 // Seed-only mode: `dotnet run -- seed-only` migrates + seeds and exits (no web server).

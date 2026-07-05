@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ReflowOven.Application.Services;
 
 /// <summary>Manutenção backend: storage/category overview, real category clearing and factory reset.</summary>
-public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds, AuditService audit, ICurrentUser current)
+public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher, IClock clock, ISystemController system, IMasterCredentials master, IAdminCredentials adminCreds, AuditService audit, ICurrentUser current, ITokenRevocationList revocations)
 {
     /// <summary>Fallback per-row byte estimate, used only if a table's real size can't be read. The category
     /// sizes are the exact <c>pg_total_relation_size</c> of each backing table; inactive users (a row subset
@@ -86,12 +86,29 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
         var now = clock.UtcNow;
         var actor = current.Name;
         var deleted = 0;
+        // Filled INSIDE the transaction below (see the snapshot) so the revoked set is exactly the mutated set.
+        var revokeUserIds = new List<Guid>();
+
         // Each per-category bulk delete/update auto-commits on its own; wrap the whole sequence (and the audit
         // row) in one transaction so a failure midway can't leave the database partially cleared. No-op on the
         // in-memory test store, where BeginTransactionAsync returns null.
         await using var tx = await db.BeginTransactionAsync(ct);
         try
         {
+            // Snapshot the target user ids INSIDE the transaction, then soft-delete EXACTLY those ids (not a
+            // re-evaluated predicate). This closes the TOCTOU where a Status flip between a pre-tx snapshot and
+            // the update would soft-delete a user that was never added to the revoke set (keeping a ≤8 h token):
+            // here the revoked set == the mutated set by construction.
+            var inativoIds = cats.Contains(CleanupId.Inativos)
+                ? await db.Users.Where(u => u.Status == UserStatus.Inativo).Select(u => u.Id).ToListAsync(ct)
+                : [];
+            var usuarioIds = cats.Contains(CleanupId.Usuarios)
+                ? await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId))
+                    .Select(u => u.Id).ToListAsync(ct)
+                : [];
+            revokeUserIds.AddRange(inativoIds);
+            revokeUserIds.AddRange(usuarioIds);
+
             foreach (var cat in cats)
             {
                 deleted += cat switch
@@ -104,7 +121,8 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                     // Users/programs are SOFT-deleted: the Admin never destroys data, it sends it to the Master's
                     // Lixeira (who alone restores or permanently purges it). Only the trash categories below — and a
                     // factory reset — actually delete rows. Stamped with who/when so the trash shows "deleted by".
-                    CleanupId.Inativos => await db.Users.Where(u => u.Status == UserStatus.Inativo)
+                    // Soft-delete exactly the snapshotted ids so the revoke set (above) matches the mutated rows.
+                    CleanupId.Inativos => await db.Users.Where(u => inativoIds.Contains(u.Id))
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(u => u.IsDeleted, true)
                             .SetProperty(u => u.DeletedAt, now)
@@ -117,8 +135,8 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
                             .SetProperty(p => p.DeletedAt, now)
                             .SetProperty(p => p.DeletedBy, actor), ct),
                     // ACTIVE users only (inativos have their own category), except the caller and the hidden Master
-                    // (the spare-the-signed-in rule is server-side).
-                    CleanupId.Usuarios => await db.Users.Where(u => u.Type != UserType.Master && u.Status == UserStatus.Ativo && (selfId == null || u.Id != selfId))
+                    // (the spare-the-signed-in rule is server-side). Same snapshotted-ids target as above.
+                    CleanupId.Usuarios => await db.Users.Where(u => usuarioIds.Contains(u.Id))
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(u => u.IsDeleted, true)
                             .SetProperty(u => u.DeletedAt, now)
@@ -143,6 +161,11 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             if (tx is not null) await tx.RollbackAsync(ct);
             throw;
         }
+
+        // Only after a successful commit: users just sent to the trash must not keep their live sessions.
+        foreach (var id in revokeUserIds)
+            await revocations.RevokeAsync(id, ct);
+
         return new CleanupResultDto(deleted);
     }
 
@@ -173,6 +196,9 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             await db.PasswordResetTokens.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
             await db.UserActivityStats.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
             await db.Users.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
+            // NOTE: TokenRevocations is deliberately NOT wiped. The RevokeAllAsync() at the end of this method
+            // writes a fresh global mark that already invalidates every pre-reset token, so any stale per-user
+            // rows are redundant and bounded (they only ever match tokens for users that no longer exist).
 
             // Programs: drop ALL (including hidden seeds) and reseed just the factory default.
             await db.Programs.IgnoreQueryFilters().ExecuteDeleteAsync(ct);
@@ -215,6 +241,10 @@ public sealed class MaintenanceService(IAppDbContext db, IPasswordHasher hasher,
             if (tx is not null) await tx.RollbackAsync(ct);
             throw;
         }
+
+        // Every pre-reset account is gone (ids replaced by the reseed) — no outstanding JWT may survive,
+        // including the caller's own: the device is factory-fresh and everyone re-authenticates.
+        await revocations.RevokeAllAsync(ct);
     }
 
 }

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ReflowOven.Infrastructure.Persistence;
@@ -12,9 +13,11 @@ using ReflowOven.Infrastructure.Persistence;
 namespace ReflowOven.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ReflowDbContext))]
-    partial class ReflowDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260703233225_AddTokenRevocations")]
+    partial class AddTokenRevocations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -248,7 +251,7 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("character varying(10)");
 
-                    b.Property<int>("InputVoltage")
+                    b.Property<int?>("InputVoltage")
                         .HasColumnType("integer");
 
                     b.Property<string>("Message")

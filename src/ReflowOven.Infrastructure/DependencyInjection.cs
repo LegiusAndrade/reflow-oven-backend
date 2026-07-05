@@ -51,6 +51,13 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddSingleton<ILoginThrottle, LoginThrottle>();
 
+        // JWT revocation: deactivating/demoting/deleting a user (or a self/admin/recovery password change)
+        // cuts the user's outstanding tokens immediately instead of waiting out the 8 h expiry. In-memory
+        // hot path + a durable watermark table hydrated at startup (survives the appliance's own restarts).
+        // Registered concrete-first so Program.cs can hydrate it before serving traffic.
+        services.AddSingleton<TokenRevocationList>();
+        services.AddSingleton<ITokenRevocationList>(sp => sp.GetRequiredService<TokenRevocationList>());
+
         services.Configure<MasterOptions>(config.GetSection(MasterOptions.Section));
         services.AddSingleton<IMasterCredentials, MasterCredentials>();
 

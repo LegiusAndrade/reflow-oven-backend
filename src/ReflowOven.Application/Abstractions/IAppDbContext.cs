@@ -11,6 +11,7 @@ public interface IAppDbContext
     DbSet<User> Users { get; }
     DbSet<UserActivityStat> UserActivityStats { get; }
     DbSet<PasswordResetToken> PasswordResetTokens { get; }
+    DbSet<TokenRevocation> TokenRevocations { get; }
 
     DbSet<ReflowProgram> Programs { get; }
     DbSet<FavoriteProgram> Favorites { get; }

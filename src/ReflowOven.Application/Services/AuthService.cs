@@ -11,6 +11,7 @@ public sealed class AuthService(
     IClock clock,
     ITechnicianCredentials technician,
     ILoginThrottle throttle,
+    ITokenRevocationList revocations,
     IEmailSender email,
     ICurrentUser current,
     AuditService audit,
@@ -27,19 +28,39 @@ public sealed class AuthService(
         var password = req.Password ?? "";
         var lower = username.ToLowerInvariant();
 
+        // Throttle key: real usernames are ≤ UserNameMaxLength by construction (so legitimate lockouts are
+        // unchanged); an absurdly long typed name is bucketed by its bounded prefix, so an anonymous client
+        // can't bloat the in-process cache with arbitrarily large keys either.
+        var throttleKey = lower.Length <= DomainConstants.UserNameMaxLength
+            ? lower
+            : lower[..DomainConstants.UserNameMaxLength];
+
         // Brute-force / DoS guard: once a name has failed too many times it is locked for a cooldown. We
         // bail BEFORE the costly BCrypt verify (so a lockout also blunts the CPU-DoS angle), with a generic
         // message and keyed on the typed name — so it reveals nothing about whether the account exists.
-        if (throttle.LockRemaining(lower) is { } wait)
+        if (throttle.LockRemaining(throttleKey) is { } wait)
         {
-            logger.LogWarning("Login bloqueado por excesso de tentativas: '{User}'.", username);
+            logger.LogWarning("Login bloqueado por excesso de tentativas: '{User}'.", throttleKey);
             return LoginResult.Fail($"Muitas tentativas de login. Tente novamente em {FormatWait(wait)}.", (int)Math.Ceiling(wait.TotalSeconds));
+        }
+
+        // No account can carry a name longer than the creation cap, but the anonymous failure audit below
+        // stores the typed name in bounded columns (OperatorName varchar(40) / ObjectId varchar(64)) — an
+        // overlong name would blow that INSERT up into a 500 instead of the {ok,error} login contract, and
+        // lose the audit row with it. Reject early with the SAME generic message (no length oracle beyond
+        // what user creation already documents), still counting the failure so the throttle keeps blunting
+        // brute force via long names.
+        if (username.Length > DomainConstants.UserNameMaxLength)
+        {
+            throttle.RecordFailure(throttleKey);
+            logger.LogWarning("Login falhou: usuário informado excede {Max} caracteres.", DomainConstants.UserNameMaxLength);
+            return LoginResult.Fail("Usuário ou senha incorretos.");
         }
 
         // Hidden technician session — Calibração-scoped (role Tecnico), no User row.
         if (string.Equals(username, technician.Username, StringComparison.OrdinalIgnoreCase) && technician.Verify(password))
         {
-            throttle.Reset(lower);
+            throttle.Reset(throttleKey);
             logger.LogInformation("Login OK: técnico '{User}' (Calibração).", username);
             audit.Record(OperationType.Login, OperationObject.Sessao, "calibracao", [OperationField.Of("papel", "Técnico (Calibração)")], operatorName: "Técnico");
             await db.SaveChangesAsync(ct);
@@ -60,7 +81,7 @@ public sealed class AuthService(
 
         if (user is null || !passwordOk)
         {
-            throttle.RecordFailure(lower);
+            throttle.RecordFailure(throttleKey);
             logger.LogWarning("Login falhou: credenciais inválidas para '{User}'.", username);
             audit.Record(OperationType.Login, OperationObject.Sessao, username, [OperationField.Of("resultado", "falha")], operatorName: username);
             await db.SaveChangesAsync(ct);
@@ -68,7 +89,7 @@ public sealed class AuthService(
         }
 
         // Password is correct from here on — clear any accumulated failures/lock for this name.
-        throttle.Reset(lower);
+        throttle.Reset(throttleKey);
 
         // Reachable only once the password is correct, so surfacing an inactive account leaks no existence
         // to an attacker (they'd already need valid credentials) while still telling a real user why.
@@ -102,6 +123,11 @@ public sealed class AuthService(
                     var changeBy = now.AddDays(DomainConstants.PasswordChangeWithinDays);
                     await db.SaveChangesAsync(ct);
 
+                    // Consistency with every other password-set path (self/admin/recovery): rewriting the hash
+                    // invalidates the old provisional password, so cut any session still holding a token minted
+                    // under it. Low impact (time-triggered) but keeps the invariant "any password reset cuts sessions".
+                    await revocations.RevokeAsync(user.Id, ct);
+
                     logger.LogWarning("Senha provisória de '{User}' expirada; nova senha gerada e enviada.", user.Name);
                     try { await email.SendNewUserAsync(user.Email, user.Name, newTemp, changeBy, ct); }
                     catch (Exception ex) { logger.LogError(ex, "Falha ao enviar a nova senha provisória para '{Email}'.", user.Email); }
@@ -129,8 +155,11 @@ public sealed class AuthService(
         return LoginResult.Success(tok.Token, tok.ExpiresAt, dto);
     }
 
-    /// <summary>Authenticated self-service password change; clears the forced-change flag.</summary>
-    public async Task<OkResponse> ChangePasswordAsync(ChangePasswordRequest req, CancellationToken ct = default)
+    /// <summary>Authenticated self-service password change; clears the forced-change flag. Revokes every
+    /// token minted under the old password (a user changing their own password usually suspects it is
+    /// compromised — the most security-relevant path) and returns a fresh token so the caller stays signed
+    /// in instead of being logged out by the revocation they just triggered.</summary>
+    public async Task<ChangePasswordResult> ChangePasswordAsync(ChangePasswordRequest req, CancellationToken ct = default)
     {
         var uid = current.UserId ?? throw new ForbiddenAppException("Sessão sem usuário (login técnico não troca senha).");
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == uid, ct)
@@ -153,8 +182,18 @@ public sealed class AuthService(
         audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name, [OperationField.Of("senha", "alterada")], operatorId: user.Id, operatorName: user.Name);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Senha alterada por '{User}'.", user.Name);
-        return new OkResponse();
+        // Cut every session minted under the old password (a compromised token must not outlive the change),
+        // THEN mint a fresh token for the caller. The revoke mark and the new token share the same second, so
+        // the fresh token passes the same-second boundary while everything older is rejected — the caller
+        // stays signed in, everyone else on the old password is out.
+        await revocations.RevokeAsync(user.Id, ct);
+        var tok = jwt.CreateForUser(user);
+        var prefs = UserService.MapPrefs(user.Preferences);
+        var session = new SessionDto(user.Id.ToString(), user.Name, user.Type, tok.IssuedAtUnixMs, null,
+            null, prefs.Theme, prefs.ChartSeries);
+
+        logger.LogInformation("Senha alterada por '{User}'; sessões anteriores revogadas e novo token emitido.", user.Name);
+        return new ChangePasswordResult(true, tok.Token, tok.ExpiresAt, session);
     }
 
     /// <summary>Stateless logout (the client discards the JWT) — recorded on the operation log for the
@@ -231,6 +270,10 @@ public sealed class AuthService(
         audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name,
             [OperationField.Of("senha", "redefinida por recuperação")], operatorId: user.Id, operatorName: user.Name);
         await db.SaveChangesAsync(ct);
+
+        // A recovery reset usually means the old password may be compromised — cut any session still
+        // holding a JWT minted under it (the user just proved control of the account via the email token).
+        await revocations.RevokeAsync(user.Id, ct);
 
         logger.LogInformation("Senha redefinida por recuperação para '{User}'.", user.Name);
         return new OkResponse();

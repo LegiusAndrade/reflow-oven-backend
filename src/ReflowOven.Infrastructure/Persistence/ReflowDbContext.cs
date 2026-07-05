@@ -11,6 +11,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
     public DbSet<User> Users => Set<User>();
     public DbSet<UserActivityStat> UserActivityStats => Set<UserActivityStat>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<TokenRevocation> TokenRevocations => Set<TokenRevocation>();
 
     public DbSet<ReflowProgram> Programs => Set<ReflowProgram>();
     public DbSet<FavoriteProgram> Favorites => Set<FavoriteProgram>();
@@ -71,6 +72,15 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(t => t.TokenHash).HasMaxLength(100);
             e.HasOne(t => t.User).WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasQueryFilter(t => !t.User!.IsDeleted); // follow the owning user's soft-delete filter
+        });
+
+        // Durable JWT-revocation watermarks (backs the in-memory ITokenRevocationList across restarts).
+        // Keyed by subject (user id, or Guid.Empty for the global "revoke everyone" mark); no FK to Users
+        // so the mark outlives a purged user (its stale tokens must still be rejected until they expire).
+        b.Entity<TokenRevocation>(e =>
+        {
+            e.HasKey(t => t.Subject);
+            e.Property(t => t.Subject).ValueGeneratedNever();
         });
 
         b.Entity<ReflowProgram>(e =>

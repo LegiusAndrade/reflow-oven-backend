@@ -3,7 +3,8 @@ namespace ReflowOven.Application.Services;
 /// <summary>CRUD for users (Usuários tab). Name is unique (case-insensitive) and immutable after create.</summary>
 public sealed class UserService(
     IAppDbContext db, IPasswordHasher hasher, IClock clock, AuditService audit,
-    ICurrentUser current, IEmailSender emailSender, ILogger<UserService> logger)
+    ICurrentUser current, IEmailSender emailSender, ITokenRevocationList revocations,
+    ILogger<UserService> logger)
 {
     public async Task<IReadOnlyList<UserDto>> ListAsync(CancellationToken ct = default)
     {
@@ -126,6 +127,13 @@ public sealed class UserService(
         await audit.BumpActivityAsync(Defaults.ActivityLabels[2], ct); // usuários alterados
         audit.Record(OperationType.Alteracao, OperationObject.Usuario, user.Name, changes);
         await db.SaveChangesAsync(ct);
+
+        // Anything that narrows (or resets) what the bearer may do — deactivation, a role change, an
+        // admin-set password — must cut the user's outstanding JWTs now, not at the 8 h expiry. Done only
+        // after the save succeeded; the next login mints a fresh (newer) token that passes validation.
+        if (beforeType != user.Type || beforeStatus != user.Status || passwordChanged)
+            await revocations.RevokeAsync(user.Id, ct);
+
         logger.LogInformation("Usuário atualizado: '{Name}' ({Type}/{Status}) por '{Actor}'.", user.Name, user.Type, user.Status, current.Name);
         return Map(user);
     }
@@ -184,6 +192,10 @@ public sealed class UserService(
         await audit.BumpActivityAsync(Defaults.ActivityLabels[3], ct); // usuários deletados
         audit.Record(OperationType.Remocao, OperationObject.Usuario, user.Name, [OperationField.Of("tipo", user.Type)]);
         await db.SaveChangesAsync(ct);
+
+        // A deleted user must not keep operating the oven on a token minted before the removal.
+        await revocations.RevokeAsync(user.Id, ct);
+
         logger.LogInformation("Usuário removido (soft): '{Name}' por '{Actor}'.", user.Name, current.Name);
     }
 

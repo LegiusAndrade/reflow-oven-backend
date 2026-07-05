@@ -33,9 +33,10 @@ public sealed class AuthController(AuthService auth, UserService users) : Contro
         return NoContent();
     }
 
-    /// <summary>Authenticated self-service password change (clears the forced-change flag).</summary>
+    /// <summary>Authenticated self-service password change (clears the forced-change flag). Revokes the
+    /// old-password sessions and returns a fresh token/session so the caller stays signed in.</summary>
     [HttpPost("change-password")]
-    public Task<OkResponse> ChangePassword([FromBody] ChangePasswordRequest req, CancellationToken ct) => auth.ChangePasswordAsync(req, ct);
+    public Task<ChangePasswordResult> ChangePassword([FromBody] ChangePasswordRequest req, CancellationToken ct) => auth.ChangePasswordAsync(req, ct);
 
     /// <summary>Reflects the JWT claims back as the frontend Session shape, plus the user's stored preferences.</summary>
     [HttpGet("me")]

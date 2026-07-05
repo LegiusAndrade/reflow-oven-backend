@@ -21,6 +21,15 @@ public sealed record SessionDto(
 /// <summary>Authenticated self-service password change.</summary>
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
+/// <summary>
+/// Result of a successful self-service password change. Changing your own password revokes every token
+/// minted under the OLD password (the security point: a stolen session dies immediately), so the response
+/// carries a FRESH token + session minted after the revoke — the client swaps its stored JWT and stays
+/// signed in. Shape is additive over the old <c>{ok:true}</c>: <c>Token</c>/<c>ExpiresAt</c>/<c>Session</c>
+/// are new fields a client can adopt (mirrors <see cref="LoginResult"/>'s success fields).
+/// </summary>
+public sealed record ChangePasswordResult(bool Ok, string Token, DateTimeOffset ExpiresAt, SessionDto Session);
+
 /// <summary>Login outcome mirroring the frontend's {ok,error} contract (HTTP 200 on either branch).
 /// <c>RetryAfterSeconds</c> is set only when the attempt was throttled (lockout), so the UI can show a
 /// countdown; it is omitted otherwise.</summary>
