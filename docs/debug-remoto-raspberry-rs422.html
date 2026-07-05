@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debug remoto na Raspberry Pi (VS Code Remote-SSH) — RS422</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e6e9ef; --muted:#9aa4b2;
+    --line:#2a2f3a; --accent:#4f9cff; --accent2:#7c5cff;
+    --code-bg:#11141a; --code-ink:#d6deeb; --green:#3fb950; --amber:#d29922; --red:#f85149;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  .wrap{max-width:920px; margin:0 auto; padding:40px 24px 96px}
+  header.hero{
+    background:linear-gradient(135deg,#1a2433,#171a21);
+    border:1px solid var(--line); border-radius:16px; padding:28px 30px; margin-bottom:28px;
+  }
+  header.hero h1{margin:0 0 8px; font-size:28px; line-height:1.25}
+  header.hero p{margin:0; color:var(--muted)}
+  .pill{display:inline-block; font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:3px 10px; margin-bottom:14px}
+  h2{margin:42px 0 12px; font-size:21px; padding-bottom:8px; border-bottom:1px solid var(--line)}
+  h3{margin:26px 0 8px; font-size:17px; color:#f0f3f8}
+  p{margin:10px 0}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{background:var(--code-bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px;
+    font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; color:#cfe3ff}
+  pre{background:var(--code-bg); border:1px solid var(--line); border-radius:12px; padding:16px 18px;
+    overflow:auto; margin:14px 0}
+  pre code{background:none; border:0; padding:0; color:var(--code-ink); font-size:13px; line-height:1.6}
+  .toc{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 22px; margin-bottom:8px}
+  .toc h2{margin:0 0 10px; border:0; font-size:15px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)}
+  .toc ol{margin:0; padding-left:22px} .toc li{margin:4px 0}
+  .step{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 22px 18px; margin:18px 0}
+  .step h2{display:flex; align-items:center; gap:12px; border:0; margin-top:18px}
+  .num{flex:0 0 34px; height:34px; width:34px; display:grid; place-items:center; border-radius:50%;
+    background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:15px; font-weight:700}
+  .callout{border-radius:12px; padding:14px 16px 14px 18px; margin:16px 0; border:1px solid var(--line);
+    border-left-width:4px; background:var(--panel2)}
+  .callout p:first-child{margin-top:0} .callout p:last-child{margin-bottom:0}
+  .callout.info{border-left-color:var(--accent)}
+  .callout.tip{border-left-color:var(--green)}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout.danger{border-left-color:var(--red)}
+  .callout .tag{font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:4px}
+  .info .tag{color:var(--accent)} .tip .tag{color:var(--green)} .warn .tag{color:var(--amber)} .danger .tag{color:var(--red)}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px}
+  th,td{border:1px solid var(--line); padding:8px 12px; text-align:left; vertical-align:top}
+  th{background:var(--panel2); color:#f0f3f8}
+  td code{font-size:12.5px}
+  ul,ol{padding-left:22px} li{margin:6px 0}
+  kbd{background:#222733; border:1px solid var(--line); border-bottom-width:2px; border-radius:6px;
+    padding:1px 7px; font-family:inherit; font-size:12.5px}
+  .muted{color:var(--muted)}
+  footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px}
+  .diagram{background:var(--code-bg); border:1px solid var(--line); border-radius:12px; padding:18px; margin:16px 0;
+    font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12.5px; line-height:1.5; color:#bcd0e8; white-space:pre; overflow:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="pill">Reflow Oven · Backend · .NET 10</span>
+  <h1>Debug remoto na Raspberry Pi via VS&nbsp;Code Remote-SSH</h1>
+  <p>Editar e depurar do notebook, mas executar o backend <strong>na Raspberry</strong> — onde está a comunicação serial <strong>RS422</strong> com a placa STM32.</p>
+</header>
+
+<div class="callout info">
+  <span class="tag">Resposta curta</span>
+  <p><strong>Sim, é possível e é exatamente o caso de uso do Remote-SSH.</strong> O VS Code instala um <em>server</em> na Pi; o build, o processo <code>dotnet</code>, o debugger (<code>vsdbg</code>) e o acesso à porta serial rodam <strong>na própria Raspberry</strong>. Você só vê a interface no notebook. Assim o driver <code>Rs422PowerBoard</code> abre o <code>/dev/tty*</code> real e fala com a placa.</p>
+</div>
+
+<nav class="toc">
+  <h2>Passos</h2>
+  <ol>
+    <li><a href="#como">Como funciona (arquitetura)</a></li>
+    <li><a href="#pre">Pré-requisitos</a></li>
+    <li><a href="#p1">Conectar via Remote-SSH</a></li>
+    <li><a href="#p2">Abrir o projeto (clonado na Pi)</a></li>
+    <li><a href="#p3">Instalar as extensões C# no <em>remoto</em></a></li>
+    <li><a href="#p4">Conferir o SDK .NET 10 na Pi</a></li>
+    <li><a href="#p5">Subir o PostgreSQL (Docker)</a></li>
+    <li><a href="#p6">Liberar a serial RS422</a></li>
+    <li><a href="#p7">Depurar (F5) com a placa real</a></li>
+    <li><a href="#p8">Acessar a API a partir do notebook</a></li>
+    <li><a href="#caveats">Observações importantes</a></li>
+    <li><a href="#trouble">Solução de problemas</a></li>
+  </ol>
+</nav>
+
+<section id="como">
+<h2>1 · Como funciona</h2>
+<p>No Remote-SSH o VS Code se divide em duas metades:</p>
+<div class="diagram">┌──────────────── NOTEBOOK ────────────────┐        ┌──────────── RASPBERRY PI (ssh reflow-oven) ────────────┐
+│  VS Code (UI / janela / extensões de tema)│  SSH   │  VS Code Server  (~/.vscode-server)                     │
+│                                           │ ◀────▶ │   • build dotnet  • debugger vsdbg                       │
+│  Painéis: editor, PORTS, RUN AND DEBUG    │        │   • processo ReflowOven.Api  ──▶  /dev/ttyS0 (RS422)     │
+│                                           │        │   • Postgres em Docker (localhost:5432 = a própria Pi)  │
+└───────────────────────────────────────────┘        └─────────────────────────────────────────────────────────┘</div>
+<p>Consequências práticas:</p>
+<ul>
+  <li>Os <strong>breakpoints, variáveis e o passo a passo</strong> são do processo que roda <strong>na Pi</strong>.</li>
+  <li>O <code>System.IO.Ports.SerialPort</code> abre a UART real da Raspberry — é por isso que precisa ser ali.</li>
+  <li><code>localhost</code> dentro do código passa a ser a <strong>Pi</strong> (ex.: a connection string <code>Host=localhost;Port=5432</code> aponta para o Postgres que sobe na própria Pi).</li>
+  <li>Os arquivos <code>.vscode/launch.json</code> e <code>.vscode/tasks.json</code> já existem no repo e usam <code>${env:HOME}/.dotnet</code> — então <strong>funcionam igual na Pi</strong>, sem edição.</li>
+</ul>
+</section>
+
+<section id="pre">
+<h2>2 · Pré-requisitos</h2>
+<h3>No notebook</h3>
+<ul>
+  <li>VS Code + extensão <strong>Remote - SSH</strong> (<code>ms-vscode-remote.remote-ssh</code>).</li>
+  <li>SSH configurado para a Pi. No <strong>notebook</strong>, crie/edite o <code>~/.ssh/config</code> e ajuste as permissões:</li>
+</ul>
+<pre><code>mkdir -p ~/.ssh
+
+cat &gt; ~/.ssh/config &lt;&lt;'EOF'
+Host reflow-oven
+    HostName raspberrypi.local
+    User reflow-oven
+    IdentityFile ~/.ssh/MASTER_id_ed25519
+    IdentitiesOnly yes
+EOF
+
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/config
+chmod 600 ~/.ssh/MASTER_id_ed25519        # chave privada
+chmod 644 ~/.ssh/MASTER_id_ed25519.pub    # chave pública
+
+ssh reflow-oven        # testa a conexão (na 1ª vez, confirme o fingerprint com "yes")</code></pre>
+<div class="callout info">
+  <span class="tag">Os campos / as permissões</span>
+  <p><code>HostName raspberrypi.local</code> resolve por mDNS (mesma rede LAN; se não resolver, troque pelo IP da Pi). <code>User reflow-oven</code> é o usuário na Raspberry; <code>IdentityFile</code> aponta a sua chave privada e <code>IdentitiesOnly yes</code> força o SSH a usar só ela (evita "Too many authentication failures"). Os <code>chmod</code> são <strong>obrigatórios</strong>: o SSH ignora a chave/config se a permissão estiver frouxa demais. Ajuste o nome da chave se a sua for diferente.</p>
+</div>
+<h3>Na Raspberry</h3>
+<ul>
+  <li><strong>Raspberry Pi OS 64-bit (arm64)</strong> — o C# Dev Kit e o debugger <code>vsdbg</code> exigem 64 bits (veja a nota em <a href="#caveats">Observações</a> se a sua for 32-bit).</li>
+  <li><strong>.NET 10 SDK</strong> em <code>~/.dotnet</code> (mesmo layout do note; o <code>global.json</code> fixa a versão <code>10.0.108</code>).</li>
+  <li><strong>Docker + Docker Compose</strong> (você já instalou).</li>
+  <li><strong>git</strong> e o repositório <strong>clonado na Pi</strong> (o código precisa estar lá, não montado do note).</li>
+</ul>
+<pre><code># na Pi
+git clone https://github.com/LegiusAndrade/reflow-oven-backend.git
+cd reflow-oven-backend</code></pre>
+</section>
+
+<section id="p1" class="step">
+<h2><span class="num">1</span> Conectar via Remote-SSH</h2>
+<p>No notebook, abra a paleta de comandos (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>) e rode:</p>
+<pre><code>Remote-SSH: Connect to Host…   →   reflow-oven</code></pre>
+<p>Uma nova janela abre já <em>dentro</em> da Pi. Na <strong>primeira</strong> conexão o VS Code baixa e instala o server na Raspberry (demora um pouco). O canto inferior esquerdo passa a mostrar <strong>“SSH: reflow-oven”</strong> — confirme que está verde antes de seguir.</p>
+</section>
+
+<section id="p2" class="step">
+<h2><span class="num">2</span> Abrir o projeto (clonado na Pi)</h2>
+<p><strong>File → Open Folder…</strong> e escolha o caminho do clone <em>na Pi</em> (ex.: <code>/home/lsilva/reflow-oven-backend</code>). O seletor de arquivos já lista o disco da Raspberry, não o do note.</p>
+</section>
+
+<section id="p3" class="step">
+<h2><span class="num">3</span> Instalar as extensões C# no <em>remoto</em></h2>
+<p>Extensões de linguagem precisam estar instaladas <strong>no contexto SSH</strong> (não basta tê-las no note). O repo já recomenda as certas em <code>.vscode/extensions.json</code>, então o VS Code oferece um botão <strong>“Install in SSH: reflow-oven”</strong>:</p>
+<ul>
+  <li><code>ms-dotnettools.csdevkit</code> — C# Dev Kit</li>
+  <li><code>ms-dotnettools.csharp</code> — C# (traz o debugger <code>vsdbg</code>, baixado automaticamente no server)</li>
+</ul>
+<div class="callout tip"><span class="tag">Dica</span><p>Na aba de extensões, a seção <strong>“SSH: reflow-oven — Installed”</strong> mostra o que está instalado no remoto. As duas acima precisam aparecer ali.</p></div>
+</section>
+
+<section id="p4" class="step">
+<h2><span class="num">4</span> Conferir o SDK .NET 10 na Pi</h2>
+<p>O terminal integrado (<kbd>Ctrl</kbd>+<kbd>`</kbd>) já é um shell <strong>da Pi</strong>. Como o SDK fica em <code>~/.dotnet</code> (fora do PATH global):</p>
+<pre><code>export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+dotnet --info          # deve listar o SDK 10.0.108 (arm64)</code></pre>
+<p>Se o SDK ainda não estiver lá, instale com o script oficial (sem precisar de root):</p>
+<pre><code>curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --version 10.0.108 --install-dir "$HOME/.dotnet"</code></pre>
+<div class="callout info"><span class="tag">Nota</span><p>A <strong>tarefa de build</strong> do projeto (<code>.vscode/tasks.json</code>) já chama o dotnet pelo caminho absoluto <code>${env:HOME}/.dotnet/dotnet</code> e exporta <code>DOTNET_ROOT</code>, então o <kbd>F5</kbd> compila mesmo sem o PATH ajustado. O <code>export</code> acima é só para usar <code>dotnet</code> à mão no terminal.</p></div>
+</section>
+
+<section id="p5" class="step">
+<h2><span class="num">5</span> Subir o PostgreSQL (Docker)</h2>
+<p>O backend migra e faz seed no startup, então o banco precisa estar no ar <strong>na Pi</strong>:</p>
+<pre><code>docker compose up -d
+docker compose ps        # postgres deve estar "healthy"</code></pre>
+<p>Como tudo roda na Pi, o <code>Host=localhost;Port=5432</code> do <code>appsettings.json</code> já bate com esse container — nada a mudar.</p>
+</section>
+
+<section id="p6" class="step">
+<h2><span class="num">6</span> Liberar a serial RS422</h2>
+<h3>a) Descobrir o dispositivo</h3>
+<pre><code>ls -l /dev/ttyAMA0 /dev/ttyS0 /dev/ttyUSB* 2>/dev/null
+dmesg | grep -i tty            # ajuda a identificar a UART/conversor usado</code></pre>
+<p>Tipicamente: <code>/dev/ttyAMA0</code> ou <code>/dev/ttyS0</code> (UART do header GPIO) ou <code>/dev/ttyUSB0</code> (conversor USB↔RS422).</p>
+
+<h3>b) Dar permissão de acesso à porta</h3>
+<p>Adicione seu usuário ao grupo <code>dialout</code> e <strong>reabra a sessão SSH</strong> (reconectar a janela Remote-SSH) para o grupo valer:</p>
+<pre><code>sudo usermod -aG dialout "$USER"</code></pre>
+
+<h3>c) (Raspberry Pi) habilitar a UART do header</h3>
+<p>Se usar a UART do GPIO (não um conversor USB), libere o hardware e <strong>desligue o console serial de login</strong> para não brigar pela porta — via <code>sudo raspi-config</code> → <em>Interface Options → Serial Port</em>:</p>
+<ul>
+  <li>“login shell over serial?” → <strong>No</strong></li>
+  <li>“serial port hardware enabled?” → <strong>Yes</strong></li>
+</ul>
+
+<h3>d) Apontar o backend para a placa real</h3>
+<p>A seleção da placa é por configuração. Por padrão o <code>appsettings.json</code> usa <code>Hardware:Mode=Simulated</code> (o <code>SimulatedPowerBoard</code>). Para usar a placa de verdade, mude para <code>Rs422</code> — o jeito mais limpo no debug é via variável de ambiente na própria config de launch (próximo passo):</p>
+<table>
+  <tr><th>Chave</th><th>Valor</th><th>Efeito</th></tr>
+  <tr><td><code>Hardware__Mode</code></td><td><code>Rs422</code></td><td>usa <code>Rs422PowerBoard</code> (a placa real) em vez do simulador</td></tr>
+  <tr><td><code>System__Mode</code></td><td><code>Linux</code></td><td><em>(opcional)</em> usa o <code>LinuxSystemController</code> real — <code>nmcli</code>/<code>timedatectl</code>/<code>systemctl</code>, métricas de <code>/proc</code>·<code>/sys</code></td></tr>
+</table>
+<div class="callout danger">
+  <span class="tag">Atenção — o driver RS422 é um stub</span>
+  <p>Hoje <code>Rs422PowerBoard</code> é um <strong>esqueleto</strong>: todos os métodos lançam <code>NotSupportedException</code> (“RS422 power-board protocol não implementado”). Ou seja, <strong>depurar na Pi é justamente o que destrava implementá-lo</strong> — embrulhar o <code>System.IO.Ports.SerialPort</code> e falar o framing/CRC/protocolo do STM32 em <code>src/ReflowOven.Infrastructure/Hardware/Rs422PowerBoard.cs</code>.</p>
+  <p>Enquanto o protocolo não estiver pronto, a API <em>sobe</em> com <code>Rs422</code>, mas qualquer chamada à placa (ler sensores, iniciar run) vai estourar a exceção. Para ter a API inteira de pé enquanto desenvolve, deixe <code>Simulated</code> e coloque breakpoints só no caminho da serial, implementando incrementalmente.</p>
+</div>
+</section>
+
+<section id="p7" class="step">
+<h2><span class="num">7</span> Depurar (F5) com a placa real</h2>
+<p>O repo já traz a configuração <strong>“Debug API (.NET 10)”</strong> em <code>.vscode/launch.json</code> — ela compila (preLaunchTask <code>build</code>), sobe a API com o debugger anexado e já exporta <code>DOTNET_ROOT</code>/<code>PATH</code> e <code>ASPNETCORE_ENVIRONMENT=Development</code>.</p>
+<p>Para depurar contra a RS422, acrescente as variáveis ao bloco <code>env</code> dessa config (ou duplique-a como “Debug API (RS422 na Pi)”):</p>
+<pre><code>{
+  "name": "Debug API (RS422 na Pi)",
+  "type": "coreclr",
+  "request": "launch",
+  "preLaunchTask": "build",
+  "program": "${workspaceFolder}/src/ReflowOven.Api/bin/Debug/net10.0/ReflowOven.Api.dll",
+  "cwd": "${workspaceFolder}/src/ReflowOven.Api",
+  "env": {
+    "ASPNETCORE_ENVIRONMENT": "Development",
+    "DOTNET_ROOT": "${env:HOME}/.dotnet",
+    "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:PATH}",
+    "Hardware__Mode": "Rs422",
+    "System__Mode": "Linux"
+  },
+  "console": "internalConsole"
+}</code></pre>
+<p>Pressione <kbd>F5</kbd>. Coloque breakpoints clicando na margem esquerda de qualquer <code>.cs</code> — eles param no processo que roda na Pi.</p>
+<div class="callout warn">
+  <span class="tag">Esperado e benigno</span>
+  <p>O debugger parando em <code>ValidationAppException</code> / <code>NotFoundException</code> / <code>ConflictException</code> é <strong>fluxo normal de validação</strong> (o <code>ExceptionMiddleware</code> converte em 400/404/409 — nunca crasha). Para não ser interrompido nelas: painel <strong>RUN AND DEBUG → BREAKPOINTS</strong> e <strong>desmarque “User-Unhandled Exceptions”</strong>. Você continua vendo os erros de verdade (que viram 500).</p>
+</div>
+</section>
+
+<section id="p8" class="step">
+<h2><span class="num">8</span> Acessar a API a partir do notebook</h2>
+<p>A API escuta em <code>http://localhost:5248</code> <strong>na Pi</strong>. O VS Code faz <strong>port forwarding automático</strong>: o painel <strong>PORTS</strong> mostra a 5248 encaminhada e você abre <code>http://localhost:5248</code> direto no navegador do note.</p>
+<ul>
+  <li>Referência da API (Scalar): <code>http://localhost:5248/scalar</code></li>
+  <li>OpenAPI: <code>http://localhost:5248/openapi/v1.json</code></li>
+  <li>Login dev: usuário semeado (ex.: <code>lucas.silva</code>) com senha <code>reflow1234</code>.</li>
+</ul>
+<p>Se a porta não aparecer sozinha, no painel <strong>PORTS</strong> clique em <em>Forward a Port</em> e informe <code>5248</code>. Para apontar o front (<code>reflow-oven-front</code>) a esse backend, use essa mesma URL encaminhada.</p>
+</section>
+
+<section id="caveats">
+<h2>Observações importantes</h2>
+<ul>
+  <li><strong>Driver RS422 = stub.</strong> Reforçando: <code>Rs422PowerBoard</code> ainda não implementa o protocolo (é o trabalho a fazer na Pi). Veja o passo&nbsp;6d.</li>
+  <li><strong><code>System:Mode=Linux</code> exige privilégios.</strong> As <em>leituras</em> de OS funcionam, mas as <em>mutações</em> (rede via <code>nmcli</code>, relógio via <code>timedatectl</code>, reboot/shutdown via <code>systemctl</code>) precisam das regras de <code>sudoers</code>/<code>polkit</code> correspondentes. Em dev você pode deixar <code>System:Mode=Simulated</code> e só ligar a placa (<code>Hardware:Mode=Rs422</code>).</li>
+  <li><strong>Configs versionadas funcionam na Pi.</strong> <code>launch.json</code>/<code>tasks.json</code> usam <code>${env:HOME}</code>, então não há nada específico do note embutido.</li>
+  <li><strong>Build em ARM é mais lento.</strong> O primeiro <code>restore</code>/<code>build</code> na Raspberry demora bem mais que no note — é normal; as compilações seguintes são incrementais.</li>
+  <li><strong>Pi 32-bit (armhf):</strong> o C# Dev Kit não traz debugger para 32 bits. Use Raspberry Pi OS <strong>64-bit</strong> (recomendado) ou, em último caso, depure com <code>netcoredbg</code> — mas o caminho suportado é arm64.</li>
+</ul>
+</section>
+
+<section id="trouble">
+<h2>Solução de problemas</h2>
+<table>
+  <tr><th>Sintoma</th><th>Causa provável / correção</th></tr>
+  <tr><td>Breakpoint não para (fica “oco”)</td><td>As extensões C# não estão instaladas <strong>no remoto</strong> — confira a seção “SSH: reflow-oven — Installed” (passo&nbsp;3).</td></tr>
+  <tr><td><code>Permission denied</code> ao abrir <code>/dev/tty*</code></td><td>Falta o grupo <code>dialout</code> — rode o <code>usermod</code> e <strong>reconecte</strong> a sessão SSH (o grupo só vale em nova sessão).</td></tr>
+  <tr><td><code>UnauthorizedAccessException</code> / porta ocupada na UART</td><td>O console serial de login está usando a porta — desligue-o no <code>raspi-config</code> (passo&nbsp;6c).</td></tr>
+  <tr><td><code>dotnet: command not found</code> no terminal</td><td>Exporte <code>DOTNET_ROOT</code>/<code>PATH</code> (passo&nbsp;4). O <kbd>F5</kbd> não precisa disso — a task usa caminho absoluto.</td></tr>
+  <tr><td>API não conecta no banco</td><td><code>docker compose ps</code> — suba/aguarde o Postgres ficar <em>healthy</em> (passo&nbsp;5).</td></tr>
+  <tr><td><code>http://localhost:5248</code> não abre no note</td><td>Veja o painel <strong>PORTS</strong>; encaminhe a 5248 manualmente se preciso (passo&nbsp;8).</td></tr>
+  <tr><td>Toda chamada à placa lança <code>NotSupportedException</code></td><td>Esperado: <code>Rs422PowerBoard</code> é stub. Implemente o protocolo ou volte para <code>Hardware:Mode=Simulated</code>.</td></tr>
+</table>
+</section>
+
+<footer>
+  <p>Reflow Oven — backend (.NET 10 · EF Core · PostgreSQL). Documento de apoio ao desenvolvimento.
+  Caminhos e chaves de config conferidos contra <code>.vscode/launch.json</code>, <code>tasks.json</code>,
+  <code>appsettings.json</code> (<code>Hardware:Mode</code>/<code>System:Mode</code>) e
+  <code>Rs422PowerBoard.cs</code> deste repositório.</p>
+</footer>
+
+</div>
+</body>
+</html>

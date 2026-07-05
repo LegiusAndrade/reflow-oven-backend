@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debug na Raspberry via Docker (Dev Container) — .NET só no container, RS422</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e6e9ef; --muted:#9aa4b2;
+    --line:#2a2f3a; --accent:#4f9cff; --accent2:#7c5cff;
+    --code-bg:#11141a; --code-ink:#d6deeb; --green:#3fb950; --amber:#d29922; --red:#f85149;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:920px; margin:0 auto; padding:40px 24px 96px}
+  header.hero{background:linear-gradient(135deg,#1a2433,#171a21);
+    border:1px solid var(--line); border-radius:16px; padding:28px 30px; margin-bottom:28px;}
+  header.hero h1{margin:0 0 8px; font-size:27px; line-height:1.25}
+  header.hero p{margin:0; color:var(--muted)}
+  .pill{display:inline-block; font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:3px 10px; margin-bottom:14px}
+  h2{margin:42px 0 12px; font-size:21px; padding-bottom:8px; border-bottom:1px solid var(--line)}
+  h3{margin:26px 0 8px; font-size:17px; color:#f0f3f8}
+  p{margin:10px 0}
+  a{color:var(--accent); text-decoration:none} a:hover{text-decoration:underline}
+  code{background:var(--code-bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px;
+    font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; color:#cfe3ff}
+  pre{background:var(--code-bg); border:1px solid var(--line); border-radius:12px; padding:16px 18px; overflow:auto; margin:14px 0}
+  pre code{background:none; border:0; padding:0; color:var(--code-ink); font-size:13px; line-height:1.6}
+  .toc{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 22px; margin-bottom:8px}
+  .toc h2{margin:0 0 10px; border:0; font-size:15px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)}
+  .toc ol{margin:0; padding-left:22px} .toc li{margin:4px 0}
+  .step{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 22px 18px; margin:18px 0}
+  .step h2{display:flex; align-items:center; gap:12px; border:0; margin-top:18px}
+  .num{flex:0 0 34px; height:34px; width:34px; display:grid; place-items:center; border-radius:50%;
+    background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:15px; font-weight:700}
+  .callout{border-radius:12px; padding:14px 16px 14px 18px; margin:16px 0; border:1px solid var(--line);
+    border-left-width:4px; background:var(--panel2)}
+  .callout p:first-child{margin-top:0} .callout p:last-child{margin-bottom:0}
+  .callout.info{border-left-color:var(--accent)} .callout.tip{border-left-color:var(--green)}
+  .callout.warn{border-left-color:var(--amber)} .callout.danger{border-left-color:var(--red)}
+  .callout .tag{font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:4px}
+  .info .tag{color:var(--accent)} .tip .tag{color:var(--green)} .warn .tag{color:var(--amber)} .danger .tag{color:var(--red)}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px}
+  th,td{border:1px solid var(--line); padding:8px 12px; text-align:left; vertical-align:top}
+  th{background:var(--panel2); color:#f0f3f8} td code{font-size:12.5px}
+  ul,ol{padding-left:22px} li{margin:6px 0}
+  kbd{background:#222733; border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 7px; font-family:inherit; font-size:12.5px}
+  .muted{color:var(--muted)}
+  figure{margin:18px 0; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px}
+  figure img{display:block; width:100%; height:auto; border-radius:8px; border:1px solid var(--line)}
+  figure figcaption{color:var(--muted); font-size:13px; margin-top:8px; text-align:center}
+  footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px}
+  .diagram{background:var(--code-bg); border:1px solid var(--line); border-radius:12px; padding:18px; margin:16px 0;
+    font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12px; line-height:1.5; color:#bcd0e8; white-space:pre; overflow:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="pill">Reflow Oven · Backend · .NET 10 · Dev Container</span>
+  <h1>Debug na Raspberry via Docker — .NET só no container</h1>
+  <p>Depurar o backend rodando <strong>dentro de um container na Pi</strong>, com o SDK .NET e o debugger no Docker. A Raspberry só precisa do <strong>Docker</strong> — nada de .NET instalado no host — e a serial <strong>RS422</strong> é repassada ao container.</p>
+</header>
+
+<div class="callout info">
+  <span class="tag">Como funciona</span>
+  <p>Usamos <strong>Dev Containers sobre Remote-SSH</strong>: o VS Code reabre o projeto <em>dentro</em> de um container na Pi cuja imagem (<code>mcr.microsoft.com/dotnet/sdk:10.0</code>) já traz o SDK. Build, processo da API e o debugger (<code>vsdbg</code>) rodam no container; o <kbd>F5</kbd> funciona como local. A config é <strong>imagem-based</strong> (sem docker-compose) com mount explícito — ver <a href="#armadilhas">Armadilhas</a> para o porquê.</p>
+</div>
+
+<div class="callout tip">
+  <span class="tag">Diferença para o outro guia</span>
+  <p>Em <code>debug-remoto-raspberry-rs422.html</code> o .NET fica instalado <strong>no host</strong> da Pi (Remote-SSH puro). <strong>Aqui</strong> o .NET vive <strong>só no container</strong> — escolha este se não quer SDK no sistema da Raspberry.</p>
+</div>
+
+<nav class="toc">
+  <h2>Conteúdo</h2>
+  <ol>
+    <li><a href="#como">As 3 camadas</a></li>
+    <li><a href="#oque">O que vem pronto no repo</a></li>
+    <li><a href="#pre">Pré-requisitos</a></li>
+    <li><a href="#p1">Clonar o repo na Pi</a></li>
+    <li><a href="#p2">Conectar Remote-SSH na Pi</a></li>
+    <li><a href="#p3">Abrir a pasta e Reopen in Container</a></li>
+    <li><a href="#p4">Conferir que deu certo</a></li>
+    <li><a href="#p5">Postgres + build + F5</a></li>
+    <li><a href="#p6">Ligar a serial RS422</a></li>
+    <li><a href="#armadilhas">⚠️ Armadilhas que pegam (leia!)</a></li>
+    <li><a href="#sync">Atualizar a config depois</a></li>
+    <li><a href="#trouble">Solução de problemas</a></li>
+  </ol>
+</nav>
+
+<section id="como">
+<h2>1 · As 3 camadas</h2>
+<p>São três camadas encaixadas — o código e o .NET ficam na mais interna:</p>
+<div class="diagram">┌──────── NOTEBOOK ────────┐   SSH   ┌────────── RASPBERRY PI (só Docker) ──────────┐
+│ VS Code (UI)             │ ◀────▶  │  ┌──── CONTAINER (imagem dotnet/sdk:10.0) ──┐ │
+│  • RUN AND DEBUG, PORTS  │         │  │  build · vsdbg · ReflowOven.Api          │ │
+│                          │         │  │  /workspace  = a pasta REAL da Pi        │ │
+│                          │         │  │        │ device: /dev/ttyS0 (RS422)      │ │
+│                          │         │  └────────┼─────────────────────────────────┘ │
+│                          │         │   --network=host                              │
+│                          │         │  ┌───────▼──── Postgres (no host) ──────────┐ │
+│                          │         │  │  docker compose up -d  →  localhost:5432  │ │
+│                          │         │  └───────────────────────────────────────────┘ │
+└──────────────────────────┘         └───────────────────────────────────────────────┘</div>
+<ul>
+  <li>O <strong>SDK, o build e o <code>vsdbg</code></strong> estão na imagem do container — o host da Pi não tem .NET.</li>
+  <li><code>/workspace</code> é a <strong>pasta real do repo na Pi</strong> (mount explícito; ver <a href="#armadilhas">Armadilhas D</a>).</li>
+  <li>A serial é repassada ao container por <code>--device</code>; o <code>System.IO.Ports.SerialPort</code> abre o <code>/dev/tty*</code> real.</li>
+  <li>O Postgres roda <strong>no host</strong> da Pi; com <code>--network=host</code> a API o alcança em <code>localhost:5432</code> (igual ao <code>appsettings</code>).</li>
+</ul>
+</section>
+
+<section id="oque">
+<h2>2 · O que vem pronto no repo</h2>
+<table>
+  <tr><th>Arquivo</th><th>Papel</th></tr>
+  <tr><td><code>.devcontainer/devcontainer.json</code></td><td>Dev Container <strong>imagem-based</strong>: imagem do SDK, <code>workspaceMount</code> explícito, <code>--network=host</code>, extensões C# e os settings que evitam o download do SDK (polkit).</td></tr>
+  <tr><td><code>.vscode/launch.json</code> → <em>“Debug API (Docker na Pi)”</em></td><td>Launch sem <code>~/.dotnet</code> (no container o <code>dotnet</code> está no PATH); liga <code>Hardware__Mode=Rs422</code> e <code>System__Mode=Linux</code>.</td></tr>
+  <tr><td><code>.vscode/tasks.json</code> → <em>“build (container)”</em></td><td>Build que chama <code>dotnet</code> direto (PATH do container).</td></tr>
+  <tr><td><code>docker-compose.yml</code> (raiz)</td><td>O Postgres — sobe no <strong>host</strong> da Pi com <code>docker compose up -d</code>.</td></tr>
+</table>
+<p>Conteúdo do <code>.devcontainer/devcontainer.json</code>:</p>
+<pre><code>{
+  "name": "Reflow Oven — .NET 10 (Pi)",
+  "image": "mcr.microsoft.com/dotnet/sdk:10.0",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "runArgs": ["--network=host"],
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-dotnettools.csdevkit", "ms-dotnettools.csharp"],
+      "settings": {
+        "dotnet.sdk.enableAutoAcquisition": false,
+        "dotnetAcquisitionExtension.sharedExistingDotnetPath": "/usr/share/dotnet/dotnet"
+      }
+    }
+  }
+}</code></pre>
+</section>
+
+<section id="pre">
+<h2>3 · Pré-requisitos</h2>
+<h3>No notebook</h3>
+<ul>
+  <li>VS Code com <strong>Remote - SSH</strong> (<code>ms-vscode-remote.remote-ssh</code>) e <strong>Dev Containers</strong> (<code>ms-vscode-remote.remote-containers</code>).</li>
+  <li>SSH configurado para a Pi (no notebook). Crie/edite o <code>~/.ssh/config</code> e ajuste as permissões:</li>
+</ul>
+<pre><code>mkdir -p ~/.ssh
+
+cat &gt; ~/.ssh/config &lt;&lt;'EOF'
+Host reflow-oven
+    HostName raspberrypi.local
+    User reflow-oven
+    IdentityFile ~/.ssh/MASTER_id_ed25519
+    IdentitiesOnly yes
+EOF
+
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/config
+chmod 600 ~/.ssh/MASTER_id_ed25519        # chave privada
+chmod 644 ~/.ssh/MASTER_id_ed25519.pub    # chave pública
+
+ssh reflow-oven        # testa a conexão</code></pre>
+<div class="callout info">
+  <span class="tag">Os campos / as permissões</span>
+  <p><code>HostName raspberrypi.local</code> resolve por mDNS (mesma LAN; se não resolver, use o IP). <code>User reflow-oven</code> é o usuário na Pi e <code>IdentitiesOnly yes</code> força usar só essa chave. Os <code>chmod</code> são <strong>obrigatórios</strong>: o SSH ignora a chave/config com permissão frouxa. Ajuste o nome da chave se a sua for diferente.</p>
+</div>
+<h3>Na Raspberry</h3>
+<ul>
+  <li><strong>Docker + Docker Compose</strong> (você já tem). <strong>Não</strong> precisa de .NET no host.</li>
+  <li>Raspberry Pi OS <strong>64-bit (arm64)</strong> — necessário para o <code>vsdbg</code> e a imagem arm64 do SDK.</li>
+  <li><strong>git</strong> instalado (<code>sudo apt install -y git</code>) e o repositório <strong>clonado na Pi</strong> (próximo passo).</li>
+</ul>
+</section>
+
+<section id="p1" class="step">
+<h2><span class="num">1</span> Clonar o repo na Pi</h2>
+<p>O container lê o <strong>clone da Pi</strong> — o código precisa estar lá. No terminal da Pi (SSH):</p>
+<pre><code>cd ~
+git clone https://github.com/LegiusAndrade/reflow-oven-backend.git
+cd reflow-oven-backend
+git config --global user.name  "Seu Nome"       # se ainda não configurou
+git config --global user.email "seu@email"
+ls .devcontainer/        # deve listar devcontainer.json</code></pre>
+<div class="callout warn">
+  <span class="tag">Editou no note?</span>
+  <p>O container <strong>não</strong> usa os arquivos do note — usa o clone da Pi. Toda alteração feita no note só chega à Pi via <code>git push</code> (no note) + <code>git pull</code> (na Pi). Veja <a href="#sync">Atualizar a config</a>.</p>
+</div>
+</section>
+
+<section id="p2" class="step">
+<h2><span class="num">2</span> Conectar Remote-SSH na Pi</h2>
+<p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Remote-SSH: Connect to Host → reflow-oven</strong> (ou clique em <em>“reflow-oven-backend [SSH: reflow-oven]”</em> no <strong>Recent</strong>).</p>
+<p><strong>Confirme que está na Pi</strong> antes de seguir:</p>
+<ul>
+  <li>canto inferior esquerdo mostra <strong>“SSH: reflow-oven”</strong>;</li>
+  <li>no terminal, o prompt é <code>reflow-oven@raspberrypi:~$</code> (usuário <code>reflow-oven</code>, <strong>não</strong> <code>lsilva</code>).</li>
+</ul>
+</section>
+
+<section id="p3" class="step">
+<h2><span class="num">3</span> Abrir a pasta e Reopen in Container</h2>
+<ol>
+  <li><strong>File → Open Folder</strong> → <code>/home/reflow-oven/reflow-oven-backend</code>.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>“Dev Containers: Reopen in Container”</strong>.</li>
+</ol>
+<p>Na primeira vez o Docker da Pi puxa a imagem <code>dotnet/sdk:10.0</code> (arm64) e o C# Dev Kit baixa o <code>vsdbg</code> no container. Ao terminar, a barra inferior mostra <strong>“Dev Container: Reflow Oven … @ reflow-oven”</strong>.</p>
+<div class="callout danger">
+  <span class="tag">A ordem importa</span>
+  <p>“Reopen in Container” cria o container na máquina pra onde a <strong>janela atual aponta</strong>. Faça-o <strong>só depois</strong> de estar na janela Remote-SSH da Pi (passo 2). Se fizer numa janela local, sobe no note (ou pior, num híbrido quebrado — ver <a href="#armadilhas">Armadilhas B/C</a>).</p>
+</div>
+</section>
+
+<section id="p4" class="step">
+<h2><span class="num">4</span> Conferir que deu certo</h2>
+<p>No terminal integrado (agora <code>root@&lt;hash&gt;:/workspace#</code>):</p>
+<pre><code>pwd            # /workspace
+ls             # src  docs  tests  ReflowOven.slnx …  (o REPO, não Desktop/Documents)
+dotnet --info  # mostra o SDK 10 (arm64) da imagem</code></pre>
+<p>Se o <code>ls</code> mostra o <strong>repositório</strong> (e não a sua home), o mount está certo e o ambiente está pronto. O C# Dev Kit inicializa o language server localizando o .NET em <code>/usr/share/dotnet/dotnet</code>:</p>
+<figure>
+  <img src="devcontainer-pi-ok.png" alt="VS Code dentro do Dev Container na Pi: log do C# Dev Kit localizando o .NET em /usr/share/dotnet e inicializando o language server.">
+  <figcaption>Dev Container ativo na Pi — o C# Dev Kit localiza o SDK da imagem e o language server inicializa (sem erro de polkit).</figcaption>
+</figure>
+</section>
+
+<section id="p5" class="step">
+<h2><span class="num">5</span> Postgres + build + F5</h2>
+<h3>Postgres (no host da Pi)</h3>
+<p>A API migra/seed no startup, então o banco precisa estar no ar. No <strong>host</strong> da Pi (terminal SSH, <em>fora</em> do container):</p>
+<pre><code>cd ~/reflow-oven-backend
+docker compose up -d        # Postgres em localhost:5432
+docker compose ps           # "healthy"</code></pre>
+<p>Com o <code>--network=host</code> do dev container, a API o alcança em <code>localhost:5432</code> — a connection string padrão do <code>appsettings</code> já bate, sem mudar nada.</p>
+<h3>Build / Debug</h3>
+<p>No container: <kbd>F5</kbd> na config <strong>“Debug API (Docker na Pi)”</strong> (compila com a task <em>build (container)</em> e sobe com o debugger). Ou no terminal: <code>dotnet run --project src/ReflowOven.Api</code>.</p>
+<div class="callout warn">
+  <span class="tag">Esperado e benigno</span>
+  <p>O debugger parando em <code>ValidationAppException</code>/<code>NotFoundException</code>/<code>ConflictException</code> é fluxo de validação (viram 400/404/409). Para não ser interrompido: <strong>RUN AND DEBUG → BREAKPOINTS</strong>, desmarque <strong>“User-Unhandled Exceptions”</strong>.</p>
+</div>
+</section>
+
+<section id="p6" class="step">
+<h2><span class="num">6</span> Ligar a serial RS422</h2>
+<ol>
+  <li>Descubra o device <strong>na Pi</strong>: <code>ls -l /dev/ttyAMA0 /dev/ttyS0 /dev/ttyUSB*</code> (e <code>dmesg | grep -i tty</code>).</li>
+  <li>No <code>.devcontainer/devcontainer.json</code>, acrescente o <code>--device</code> ao <code>runArgs</code>:
+    <pre><code>"runArgs": ["--network=host", "--device=/dev/ttyAMA0"]</code></pre></li>
+  <li><strong>Dev Containers: Rebuild Container</strong> para recriar com a serial.</li>
+</ol>
+<div class="callout tip"><span class="tag">Sem grupo dialout</span><p>O container roda como <strong>root</strong>, então acessa <code>/dev/tty*</code> direto.</p></div>
+<div class="callout danger">
+  <span class="tag">O driver RS422 é um stub</span>
+  <p><code>Rs422PowerBoard</code> lança <code>NotSupportedException</code> em tudo. Com <code>Hardware__Mode=Rs422</code> a API sobe, mas chamadas à placa estouram — <strong>é o que você vai implementar</strong> em <code>src/ReflowOven.Infrastructure/Hardware/Rs422PowerBoard.cs</code> (embrulhar o <code>SerialPort</code> + protocolo do STM32). Enquanto isso, use <code>Hardware__Mode=Simulated</code>.</p>
+</div>
+</section>
+
+<section id="armadilhas">
+<h2>⚠️ Armadilhas que pegam (leia!)</h2>
+<p>Custaram horas; cada uma tem um sintoma específico.</p>
+<table>
+  <tr><th>#</th><th>Armadilha</th><th>Sintoma / correção</th></tr>
+  <tr>
+    <td><strong>A</strong></td>
+    <td><strong>SSH ≠ Container</strong></td>
+    <td><strong>SSH: reflow-oven</strong> te leva ao <em>host cru</em> da Pi (sem .NET → <code>dotnet: not found</code>). É preciso o 2º passo, <strong>Reopen in Container</strong>, pra entrar no Docker (com .NET).</td>
+  </tr>
+  <tr>
+    <td><strong>B</strong></td>
+    <td><strong>“Reopen” cria onde a janela aponta</strong></td>
+    <td>Se a janela tem a pasta do <strong>note</strong> aberta (<code>/home/lsilva/…</code>), o container sobe no <strong>note</strong>. Tem que estar na janela <strong>Remote-SSH da Pi</strong> (paths <code>/home/reflow-oven/…</code>) antes de dar Reopen.</td>
+  </tr>
+  <tr>
+    <td><strong>C</strong></td>
+    <td><strong>Docker context apontando pra Pi</strong></td>
+    <td>Se houver um <code>docker context</code> ativo tipo <code>ssh://reflow-oven</code> e você der Reopen numa janela <strong>local</strong>, o container sobe no Docker da Pi mas com os <strong>caminhos do note</strong> → <code>/workspace</code> vazio. Volte ao contexto local: <code>docker context use default</code> e use Remote-SSH.</td>
+  </tr>
+  <tr>
+    <td><strong>D</strong></td>
+    <td><strong>Mount relativo no compose</strong></td>
+    <td>Com docker-compose de 2 arquivos, <code>..:/workspace</code> resolve a partir da raiz do projeto e acaba montando a <strong>pasta-pai/home</strong> (o <code>ls</code> mostra Desktop/Documents). Por isso usamos config <strong>imagem-based</strong> com <code>workspaceMount: ${localWorkspaceFolder}</code> (explícito).</td>
+  </tr>
+  <tr>
+    <td><strong>E</strong></td>
+    <td><strong>Download do SDK (polkit)</strong></td>
+    <td><code>No polkit authentication agent found</code>: o C# Dev Kit tentava instalar um SDK <em>global</em>. Resolvido por <code>dotnet.sdk.enableAutoAcquisition: false</code> + <code>dotnetAcquisitionExtension.sharedExistingDotnetPath</code> (já no <code>devcontainer.json</code>).</td>
+  </tr>
+  <tr>
+    <td><strong>F</strong></td>
+    <td><strong>Settings no lugar errado</strong></td>
+    <td>Esses settings vão no <code>devcontainer.json</code> — <strong>não</strong> no <em>User settings</em> do note. No note eles apontam pra <code>/usr/share/dotnet</code> (que não existe lá) e quebram o C# local.</td>
+  </tr>
+  <tr>
+    <td><strong>G</strong></td>
+    <td><strong>Alteração não reflete na Pi</strong></td>
+    <td>O container usa o clone da Pi. Editou no note? <code>git push</code> (note) → <code>git pull</code> (Pi) → <strong>Rebuild Container</strong>. Ver abaixo.</td>
+  </tr>
+</table>
+</section>
+
+<section id="sync">
+<h2>Atualizar a config depois</h2>
+<p>Quando mudar algo do <code>.devcontainer/</code> ou do código <strong>no note</strong>:</p>
+<pre><code># no NOTE
+git add .devcontainer/ .vscode/
+git commit -m "…"
+git push
+
+# na PI (terminal SSH)
+cd ~/reflow-oven-backend && git pull
+# se reclamar de alteração local no .devcontainer:
+#   git checkout -- .devcontainer && git pull</code></pre>
+<p>Depois, no VS Code (janela da Pi): <strong>Dev Containers: Rebuild Container</strong> para aplicar a config nova.</p>
+</section>
+
+<section id="trouble">
+<h2>Solução de problemas</h2>
+<table>
+  <tr><th>Sintoma</th><th>Causa / correção</th></tr>
+  <tr><td><code>dotnet: not found</code></td><td>Você está no <strong>host</strong> da Pi (SSH), não no container. Dê <strong>Reopen in Container</strong> (armadilha A).</td></tr>
+  <tr><td><code>/workspace</code> vazio ou mostrando a home</td><td>Mount errado (armadilhas C/D). Use a config imagem-based atual e Rebuild.</td></tr>
+  <tr><td><code>No polkit authentication agent found</code></td><td>Settings do SDK ausentes — confirme que o <code>devcontainer.json</code> na Pi tem os dois settings (armadilha E) e Rebuild.</td></tr>
+  <tr><td>Container subiu no note, não na Pi</td><td>Janela local + (talvez) docker context da Pi (armadilhas B/C). Remote-SSH primeiro, container depois.</td></tr>
+  <tr><td>“Reopen in Container” não aparece</td><td>Precisa de uma pasta aberta; senão o comando é <strong>“Open Folder in Container…”</strong>. E a extensão Dev Containers tem que estar instalada no contexto SSH.</td></tr>
+  <tr><td>API não conecta no banco</td><td>Suba o Postgres no <strong>host</strong> (<code>docker compose up -d</code>); com <code>--network=host</code> a API usa <code>localhost:5432</code>.</td></tr>
+  <tr><td>Tag <code>sdk:10.0</code> não encontrada</td><td>Use <code>10.0-bookworm-slim</code> ou um patch específico (<code>10.0.108</code>) no <code>devcontainer.json</code>.</td></tr>
+  <tr><td>Toda chamada à placa lança <code>NotSupportedException</code></td><td>Esperado: <code>Rs422PowerBoard</code> é stub. Implemente o protocolo ou use <code>Hardware__Mode=Simulated</code>.</td></tr>
+</table>
+</section>
+
+<footer>
+  <p>Reflow Oven — backend (.NET 10 · EF Core · PostgreSQL). Conferido contra
+  <code>.devcontainer/devcontainer.json</code> (imagem-based, mount explícito),
+  <code>.vscode/launch.json</code> (“Debug API (Docker na Pi)”), <code>.vscode/tasks.json</code> (“build (container)”),
+  <code>docker-compose.yml</code> e <code>Rs422PowerBoard.cs</code>. Guia complementar:
+  <code>debug-remoto-raspberry-rs422.html</code> (fluxo com .NET no host).</p>
+</footer>
+
+</div>
+</body>
+</html>
