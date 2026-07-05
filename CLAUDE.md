@@ -39,6 +39,32 @@ dotnet ef database update      -p src/ReflowOven.Infrastructure -s src/ReflowOve
 Seeded dev login: any seeded user (e.g. `lucas.silva`, admin) with password **`reflow1234`**, or the
 hidden technician `calibracao` / `calibra`. See `Application/Common/Defaults.cs`.
 
+## Deploy / fresh Pi image
+
+Dev runs (`dotnet run`) never reach production — the appliance install is scripted under `deploy/`
+(full rationale in `deploy/README.md`). On a **new Pi image**, from the repo root:
+
+```bash
+sudo deploy/install.sh   # then ONE reboot (first run only, to enable I²C for the RTC)
+```
+
+`install.sh` is **idempotent** — re-run it to upgrade. What it does:
+
+- **Publish**: builds the API self-contained for **linux-arm64** via the .NET SDK Docker image (the Pi
+  has no SDK) into **`/opt/reflow-oven/backend`**, swapping the previous tree aside.
+- **Secrets**: first run generates root-only **`/etc/reflow-oven/backend.env`** (0600) — a strong JWT
+  signing key, seed passwords and the PostgreSQL password (applied to the running cluster with
+  `ALTER USER`). Real secrets never live in the repo; the committed `appsettings.json` stays dev-only.
+- **systemd units**: installs + enables **`reflow-backend`** (the API — `Production`, `Restart=always`,
+  bound to `127.0.0.1:5248`) and **`reflow-rtc`** (binds the **ISL1208** RTC on i2c-1 → `/dev/rtc0` and
+  restores the wall clock before `time-sync.target`, so an offline bench boots with the right time).
+- **I²C**: enables the bus in `/boot/firmware/config.txt` when missing — the reason for the single
+  first-run reboot.
+
+`deploy/reflow-front.service` is a template for the frontend unit — install it separately once the front
+is built on the Pi. If the SD image is ever rebuilt, running `install.sh` is the whole deploy: without it
+the Pi boots with no backend autostart, dev secrets and a wrong clock.
+
 ## Architecture
 
 Clean Architecture, four projects + tests; dependencies point inward (Api → Infrastructure → Application → Domain):

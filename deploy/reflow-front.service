@@ -1,0 +1,31 @@
+# Reflow Oven touchscreen frontend (Next.js on :3000) — TEMPLATE, part of the same bring-up as the
+# backend unit (audit BE-1 covers "o front em :3000"). Install it once the reflow-oven-front repo is
+# built on the Pi:
+#
+#   cd ~/reflow-oven-front && yarn install && yarn build     # produces .next/
+#   sudo cp deploy/reflow-front.service /etc/systemd/system/ # adjust paths below if they differ
+#   sudo systemctl daemon-reload && sudo systemctl enable --now reflow-front
+#
+# `yarn start` (next start) serves the production build on :3000; NEXT_PUBLIC_API_URL is baked at
+# build time from the front's .env.local (http://localhost:5248 — same Pi).
+
+[Unit]
+Description=Reflow Oven frontend (Next.js touchscreen UI)
+After=network-online.target reflow-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reflow-oven
+Group=reflow-oven
+WorkingDirectory=/home/reflow-oven/reflow-oven-front
+ExecStart=/usr/bin/yarn start --port 3000
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+SyslogIdentifier=reflow-front
+
+[Install]
+WantedBy=multi-user.target

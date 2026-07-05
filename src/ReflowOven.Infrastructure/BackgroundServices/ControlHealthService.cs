@@ -125,7 +125,10 @@ public sealed class ControlHealthService(
         try
         {
             var t = await system.GetTimeStatusAsync(ct);
-            return !(t.NtpEnabled && !t.NtpSynchronized); // only a fault when NTP is on but hasn't synced
+            // The appliance keeps wall time on a battery-backed RTC (ISL1208): when it is bound, boot time
+            // was restored from it and an unsynced NTP (an offline bench) does NOT mean the clock is wrong.
+            // Only flag when there is no RTC to fall back on AND NTP is enabled but hasn't synced yet.
+            return t.RtcPresent || !(t.NtpEnabled && !t.NtpSynchronized);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

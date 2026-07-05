@@ -46,8 +46,10 @@ public enum InterfaceKind
 /// <c>System.Net.NetworkInformation.NetworkInterface</c>).</summary>
 public readonly record struct NetworkInterfaceInfo(string Name, InterfaceKind Kind, bool Up, string Ip);
 
-/// <summary>Clock / NTP state.</summary>
-public readonly record struct TimeStatus(DateTimeOffset Now, string Timezone, bool NtpSynchronized, bool NtpEnabled);
+/// <summary>Clock / NTP state. <see cref="RtcPresent"/> reports whether a battery-backed hardware RTC
+/// (the ISL1208 on the device) is bound to the OS — when true, wall time is trustworthy even without
+/// NTP (the kernel restores it from the RTC at boot), which the clock health check relies on.</summary>
+public readonly record struct TimeStatus(DateTimeOffset Now, string Timezone, bool NtpSynchronized, bool NtpEnabled, bool RtcPresent = false);
 
 /// <summary>Installed vs available software version.</summary>
 public readonly record struct UpdateStatus(string CurrentVersion, string? AvailableVersion, bool UpdateAvailable);

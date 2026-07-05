@@ -1,10 +1,20 @@
-# PostgreSQL for local development of the Reflow Oven backend.
+# PostgreSQL for the Reflow Oven backend (dev box AND the Pi appliance).
 #   docker compose up -d        # start
 #   docker compose down         # stop (keeps data volume)
 #   docker compose down -v      # stop and wipe data
 #
-# Connection string consumed by the API (see appsettings.json / .env):
-#   Host=localhost;Port=5432;Database=reflowoven;Username=reflow;Password=reflow
+# Connection string consumed by the API (see appsettings.json / the production EnvironmentFile):
+#   Host=localhost;Port=5432;Database=reflowoven;Username=reflow;Password=<POSTGRES_PASSWORD>
+#
+# SECURITY — two deliberate choices here:
+#   * The port publishes on 127.0.0.1 ONLY. The API always runs on the same host (the devcontainer uses
+#     --network=host), and the database must never be reachable from the LAN: it holds users/bcrypt
+#     hashes and the thermal profiles the oven executes.
+#   * The password comes from the environment — put the real one in a gitignored `.env` next to this
+#     file (POSTGRES_PASSWORD=…). The "reflow" fallback only exists so a fresh dev clone works out of
+#     the box; it is a placeholder, not a secret. NOTE: the postgres image applies POSTGRES_PASSWORD
+#     only when the data volume is FIRST initialized — changing it later needs
+#     `ALTER USER reflow WITH PASSWORD '…'` (deploy/install.sh handles this for the appliance).
 services:
   postgres:
     image: postgres:18.4
@@ -13,9 +23,9 @@ services:
     environment:
       POSTGRES_DB: reflowoven
       POSTGRES_USER: reflow
-      POSTGRES_PASSWORD: reflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reflow}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       # postgres:18+ keeps data in a major-version subdir, so the volume mounts at the PARENT
       # /var/lib/postgresql (NOT /var/lib/postgresql/data, the pre-18 path). With the old path the 18 image

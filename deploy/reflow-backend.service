@@ -1,0 +1,38 @@
+# Reflow Oven backend — production unit (installed by deploy/install.sh to /etc/systemd/system).
+#
+# Design decisions (audit BE-1/BE-3/BE-8):
+#   * Restart=always: the appliance must come back from any crash/reboot without a human + ssh.
+#   * ASPNETCORE_ENVIRONMENT=Production: arms the Program.cs fail-fasts (placeholder JWT key and
+#     seed passwords refuse to boot) — real secrets live in the root-only EnvironmentFile.
+#   * After=time-sync.target: reflow-rtc.service (Before=time-sync.target) has already bound the
+#     ISL1208 and restored the system clock from it, so JWT iat/exp, run timestamps and the audit
+#     trail are sane from the very first request — even on an offline bench (no NTP needed).
+#     Deliberately NOT systemd-time-wait-sync: that waits for NTP and would hang an offline boot.
+#   * After/Wants docker.service: PostgreSQL runs in Docker (restart: unless-stopped). If the DB
+#     isn't up yet the API exits on the failed migration and Restart/RestartSec simply retry.
+#   * Self-contained publish: the Pi host has no .NET runtime; /opt/reflow-oven/backend carries it.
+
+[Unit]
+Description=Reflow Oven backend (ASP.NET Core API + control service)
+After=network-online.target docker.service time-sync.target
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=reflow-oven
+Group=reflow-oven
+WorkingDirectory=/opt/reflow-oven/backend
+ExecStart=/opt/reflow-oven/backend/ReflowOven.Api
+EnvironmentFile=/etc/reflow-oven/backend.env
+Restart=always
+RestartSec=3
+# The API only needs its publish dir (read), the env file (via systemd) and the network.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+# Serilog writes to the console; keep it in the journal with a stable identifier.
+SyslogIdentifier=reflow-backend
+
+[Install]
+WantedBy=multi-user.target
