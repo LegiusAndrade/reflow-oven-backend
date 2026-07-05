@@ -13,7 +13,7 @@ namespace ReflowOven.Infrastructure.Run;
 /// </summary>
 public sealed class AutotuneManager : IAutotuneManager
 {
-    private const int MaxSeconds = 1800; // hard wall-clock guard so a silent board cannot wedge _active forever
+    private const int MaxSeconds = 1800; // hard monotonic-time guard so a silent board cannot wedge _active forever
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IPowerBoard _board;
@@ -93,7 +93,7 @@ public sealed class AutotuneManager : IAutotuneManager
                 operatorId: userId, operatorName: userName ?? "Sistema");
             await db.SaveChangesAsync(ct);
 
-            _active = new ActiveTune { Row = row };
+            _active = new ActiveTune { Row = row, StartedTimestamp = _clock.GetTimestamp() };
             _logger.LogInformation("Autotune iniciado: alvo {Target} °C por '{User}' (id {Id}).",
                 targetTemp, userName ?? "técnico", row.Id);
             return GetStatus()!;
@@ -130,8 +130,9 @@ public sealed class AutotuneManager : IAutotuneManager
                 return;
             }
 
-            // Hard wall-clock guard: never let a silent firmware wedge the active tune forever.
-            if ((_clock.UtcNow - tune.Row.StartedAt).TotalSeconds > MaxSeconds)
+            // Hard time guard: never let a silent firmware wedge the active tune forever. Monotonic on
+            // purpose — an NTP/RTC step must neither falsely expire a live tune nor hold this open.
+            if (_clock.GetElapsedTime(tune.StartedTimestamp).TotalSeconds > MaxSeconds)
             {
                 try { await _board.AutoTuneAsync(AutoTuneOp.Cancel, null, ct); } catch { /* best-effort */ }
                 await FinalizeAsync(tune, AutotuneStatus.Falha, null,
@@ -161,8 +162,10 @@ public sealed class AutotuneManager : IAutotuneManager
     private async Task FinalizeAsync(ActiveTune tune, AutotuneStatus status, AutoTuneReadback? result,
         string? reason, string? faultCode, CancellationToken ct)
     {
-        var endedAt = _clock.UtcNow;
-        var duration = (int)Math.Round((endedAt - tune.Row.StartedAt).TotalSeconds);
+        // Duration is monotonic (jump-immune). Derive the stored end as StartedAt + duration (not wall-clock
+        // now) so a backward clock step mid-tune never persists a FinishedAt before StartedAt.
+        var duration = (int)Math.Round(_clock.GetElapsedTime(tune.StartedTimestamp).TotalSeconds);
+        var endedAt = tune.Row.StartedAt.AddSeconds(duration);
         var failed = status == AutotuneStatus.Falha;
 
         using (var scope = _scopeFactory.CreateScope())
@@ -243,6 +246,12 @@ public sealed class AutotuneManager : IAutotuneManager
     private sealed class ActiveTune
     {
         public required AutotuneRun Row { get; init; }
+
+        /// <summary>Monotonic start mark (<see cref="IClock.GetTimestamp"/>) — drives the max-duration
+        /// guard and the persisted duration, immune to wall-clock steps (Row.StartedAt is only the
+        /// stored wall-clock timestamp).</summary>
+        public long StartedTimestamp { get; init; }
+
         public string? LastFault { get; set; }
     }
 }

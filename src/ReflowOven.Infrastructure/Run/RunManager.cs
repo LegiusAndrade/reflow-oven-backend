@@ -121,6 +121,7 @@ public sealed class RunManager : IRunManager
                 Profile = profile,
                 Stages = stages,
                 StartedAt = _clock.UtcNow,
+                StartedTimestamp = _clock.GetTimestamp(),
                 TotalSeconds = ProfileBuilder.TotalTime(profile),
                 Status = RunStatus.Running,
                 Phase = RunPhase.Aquecimento,
@@ -177,7 +178,7 @@ public sealed class RunManager : IRunManager
                     run.ProgramName, run.RunId);
                 await FinalizeAsync(run, RunStatus.Aborted, new FaultInfo(
                     "E-130", ErrorSeverity.Alerta, "Perda de comunicação RS422 com a placa de potência durante a execução.",
-                    (int)Math.Round((_clock.UtcNow - run.StartedAt).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
+                    (int)Math.Round(_clock.GetElapsedTime(run.StartedTimestamp).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
                 return;
             }
 
@@ -195,11 +196,13 @@ public sealed class RunManager : IRunManager
                     run.ProgramName, run.RunId, boardFault.FaultTypeCode);
                 await FinalizeAsync(run, RunStatus.Aborted, new FaultInfo(
                     boardFault.FaultTypeCode, severity, message,
-                    (int)Math.Round((_clock.UtcNow - run.StartedAt).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
+                    (int)Math.Round(_clock.GetElapsedTime(run.StartedTimestamp).TotalSeconds), (int)Math.Round(run.Last?.Oven ?? 0)), ct);
                 return;
             }
 
-            var elapsed = (_clock.UtcNow - run.StartedAt).TotalSeconds;
+            // Elapsed comes from the monotonic clock, never from wall-clock subtraction: an NTP/RTC step
+            // mid-run would otherwise finish the burn early (or stretch it) — see IClock.GetTimestamp.
+            var elapsed = _clock.GetElapsedTime(run.StartedTimestamp).TotalSeconds;
             var reading = await _board.ReadAsync(ct);
             // Prefer the firmware's real setpoint/phase when its controller is driving; fall back to the locally
             // interpolated curve (the simulator and a not-yet-controlling firmware return null).
@@ -246,8 +249,11 @@ public sealed class RunManager : IRunManager
         try { await _board.StopAsync(ct); }
         catch (Exception ex) { _logger.LogWarning(ex, "Falha ao enviar STOP à placa ao finalizar (segue a finalização)."); }
         run.Status = status;
-        var endedAt = _clock.UtcNow;
-        var duration = (int)Math.Round((endedAt - run.StartedAt).TotalSeconds);
+        // Duration is monotonic (jump-immune). Derive the stored end as StartedAt + duration rather than
+        // wall-clock now, so a backward clock step mid-run (an NTP/RTC correction) can never persist an
+        // EndAt/CreatedAt BEFORE StartedAt — the stored timeline stays coherent (EndAt ≥ StartedAt always).
+        var duration = (int)Math.Round(_clock.GetElapsedTime(run.StartedTimestamp).TotalSeconds);
+        var endedAt = run.StartedAt.AddSeconds(duration);
 
         // A finalize carries a live wire status (done/aborted — the only RunStatus values) plus an optional
         // catalogued fault. A fault makes the persisted execution a Falha regardless of the wire status: a
@@ -505,7 +511,7 @@ public sealed class RunManager : IRunManager
 
     private RunStatusDto BuildStatus(ActiveRun run)
     {
-        var elapsed = (_clock.UtcNow - run.StartedAt).TotalSeconds;
+        var elapsed = _clock.GetElapsedTime(run.StartedTimestamp).TotalSeconds;
         var progress = run.TotalSeconds > 0 ? Math.Min(1, elapsed / run.TotalSeconds) : 0;
         return new RunStatusDto(
             run.RunId, run.ProgramId, run.ProgramName, run.Status, run.Phase, run.StartedAt,
@@ -524,6 +530,11 @@ public sealed class RunManager : IRunManager
         /// <summary>Logical stage boundaries (end-time + target temp) for the per-stage Comparativo do Perfil.</summary>
         public List<ProfilePoint> Stages { get; init; } = [];
         public DateTimeOffset StartedAt { get; init; }
+
+        /// <summary>Monotonic start mark (<see cref="IClock.GetTimestamp"/>) — the source for elapsed/duration,
+        /// immune to wall-clock steps; <see cref="StartedAt"/> is only the stored wall-clock timestamp.</summary>
+        public long StartedTimestamp { get; init; }
+
         public double TotalSeconds { get; init; }
         public RunStatus Status { get; set; }
         public RunPhase Phase { get; set; }
