@@ -1,37 +1,40 @@
-# Bind the ISL1208 hardware RTC and restore the system clock from it — audit BE-8.
+# Bind the PT7C4339 hardware RTC and restore the system clock from it — audit BE-8.
 #
-# The board carries an ISL1208IB8Z-TK on I²C (Pi GPIO2=SDA / GPIO3=SCL → bus i2c-1, slave 0x6f).
-# The stock Raspberry Pi `i2c-rtc` overlay has NO isl1208 option, so the device is instantiated at
-# boot through the i2c sysfs `new_device` interface; the kernel's rtc-isl1208 driver then exposes
-# /dev/rtc0 and `hwclock --hctosys` steps the system clock from it. From that point wall time is
-# correct even with no network, and once NTP syncs, the kernel's 11-minute mode writes the
-# disciplined time back to the RTC automatically.
+# The board carries a PT7C4339 (Pericom/Diodes, DS1339-compatible) on I²C
+# (Pi GPIO2=SDA / GPIO3=SCL -> bus i2c-1, slave 0x68). The stock Raspberry Pi `i2c-rtc` overlay has
+# no matching option, so the device is instantiated at boot through the i2c sysfs `new_device`
+# interface as `ds1339`; the kernel's rtc-ds1307 driver then exposes /dev/rtc0 and `hwclock
+# --hctosys` steps the system clock from it. From that point wall time is correct even with no
+# network, and once NTP syncs, the kernel's 11-minute mode writes the disciplined time back
+# to the RTC automatically.
 #
 # Ordering: Before=time-sync.target marks this unit as a clock provider, so anything ordered
 # After=time-sync.target (the backend unit) starts with the restored clock. This does NOT wait for
 # NTP (that would hang an offline bench) — the RTC IS the authoritative offline source.
 #
 # Prerequisite: `dtparam=i2c_arm=on` in /boot/firmware/config.txt (deploy/install.sh enables it;
-# needs one reboot). Until the bus exists this unit is a clean no-op (ConditionPathExists).
+# needs one reboot). The ARM i2c controller probes a few seconds into boot, so instead of a
+# ConditionPathExists (which raced and skipped the unit before the bus existed) we WAIT for i2c-1
+# in ExecStartPre — and every step no-ops cleanly if the bus never appears (pre-reboot state).
 
 [Unit]
-Description=Bind ISL1208 RTC (i2c-1 @ 0x6f) and restore system time from it
+Description=Bind PT7C4339/DS1339 RTC (i2c-1 @ 0x68) and restore system time from it
 DefaultDependencies=no
 Conflicts=shutdown.target
 After=systemd-modules-load.service
 Before=time-sync.target sysinit.target shutdown.target
-# Canonical bus path — this kernel (6.18 RPi) does not expose /sys/class/i2c-adapter.
-ConditionPathExists=/sys/bus/i2c/devices/i2c-1
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Wait (bounded, ~10 s) for the ARM i2c bus to appear; always succeeds (no-op if it never does).
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 100); do [ -e /sys/bus/i2c/devices/i2c-1 ] && break; sleep 0.1; done; :'
 # Belt & suspenders: new_device normally auto-loads the driver via modalias.
-ExecStart=-/sbin/modprobe rtc_isl1208
-# Idempotent: skip when the device is already bound (e.g. unit restart).
-ExecStart=/bin/sh -c '[ -e /sys/bus/i2c/devices/1-006f ] || echo isl1208 0x6f > /sys/bus/i2c/devices/i2c-1/new_device'
-# Give udev a moment to create /dev/rtc0, then step the system clock from the RTC.
-ExecStart=/bin/sh -c 'for i in $(seq 1 50); do [ -e /dev/rtc0 ] && break; sleep 0.1; done; exec hwclock --hctosys -f /dev/rtc0'
+ExecStart=-/sbin/modprobe rtc_ds1307
+# No-op if the bus is absent; idempotent if the device is already bound (e.g. unit restart).
+ExecStart=/bin/sh -c '[ -e /sys/bus/i2c/devices/i2c-1 ] || exit 0; [ -e /sys/bus/i2c/devices/1-0068 ] || echo ds1339 0x68 > /sys/bus/i2c/devices/i2c-1/new_device'
+# Give udev a moment to create /dev/rtc0, then step the system clock from the RTC (no-op if absent).
+ExecStart=/bin/sh -c 'for i in $(seq 1 50); do [ -e /dev/rtc0 ] && break; sleep 0.1; done; [ -e /dev/rtc0 ] && exec hwclock --hctosys -f /dev/rtc0 || exit 0'
 
 [Install]
 WantedBy=sysinit.target

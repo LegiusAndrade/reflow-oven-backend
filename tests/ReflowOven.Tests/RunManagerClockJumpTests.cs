@@ -15,7 +15,7 @@ namespace ReflowOven.Tests;
 /// <summary>
 /// Regression for the wall-clock hazard on run timing: elapsed/duration used to come from
 /// <c>clock.UtcNow - StartedAt</c>, so a step of the system clock mid-run — the boot-time restore from
-/// the ISL1208 RTC, an NTP correction, a manual time set — could finalize a live burn early or stretch
+/// the PT7C4339 RTC, an NTP correction, a manual time set — could finalize a live burn early or stretch
 /// it. The RunManager now measures elapsed on the monotonic side of <see cref="IClock"/>
 /// (GetTimestamp/GetElapsedTime), keeping wall time only for the stored timestamps.
 /// </summary>

@@ -189,8 +189,8 @@ public sealed class LinuxSystemController(
             map.GetValueOrDefault("Timezone", "UTC"),
             map.GetValueOrDefault("NTPSynchronized") == "yes",
             map.GetValueOrDefault("NTP") == "yes",
-            // The ISL1208 shows up as /dev/rtc0 once bound (deploy/reflow-rtc.service instantiates it on
-            // i2c-1 at 0x6f) — its presence means boot-time was restored from the battery-backed RTC and
+            // The PT7C4339 shows up as /dev/rtc0 once bound (deploy/reflow-rtc.service instantiates it on
+            // i2c-1 at 0x68) — its presence means boot-time was restored from the battery-backed RTC and
             // wall time is trustworthy even on an offline bench.
             RtcPresent: File.Exists(_o.RtcDevice));
     }
@@ -204,9 +204,9 @@ public sealed class LinuxSystemController(
             logger.LogError("timedatectl set-time falhou ({Code}): {Err}", set.ExitCode, set.StdErr);
             return;
         }
-        // Persist to the ISL1208 hardware RTC so a manually-set time survives a power cycle. The stock
-        // i2c-rtc overlay has NO isl1208 option — the chip is bound at boot by deploy/reflow-rtc.service
-        // (sysfs new_device on i2c-1 @ 0x6f → /dev/rtc0), which also restores the system clock from it.
+        // Persist to the PT7C4339 hardware RTC so a manually-set time survives a power cycle. The stock
+        // i2c-rtc overlay has NO ds1339 option — the chip is bound at boot by deploy/reflow-rtc.service
+        // (sysfs new_device on i2c-1 @ 0x68 → /dev/rtc0), which also restores the system clock from it.
         // Best-effort: a dev box / missing RTC just logs and the system time still changed.
         var rtc = await ProcessRunner.RunAsync("hwclock", ["--systohc", "-f", _o.RtcDevice], ct);
         if (!rtc.Ok)

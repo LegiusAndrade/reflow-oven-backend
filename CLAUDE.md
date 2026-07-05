@@ -56,7 +56,7 @@ sudo deploy/install.sh   # then ONE reboot (first run only, to enable I²C for t
   signing key, seed passwords and the PostgreSQL password (applied to the running cluster with
   `ALTER USER`). Real secrets never live in the repo; the committed `appsettings.json` stays dev-only.
 - **systemd units**: installs + enables **`reflow-backend`** (the API — `Production`, `Restart=always`,
-  bound to `127.0.0.1:5248`) and **`reflow-rtc`** (binds the **ISL1208** RTC on i2c-1 → `/dev/rtc0` and
+  bound to `127.0.0.1:5248`) and **`reflow-rtc`** (binds the **PT7C4339** RTC on i2c-1 → `/dev/rtc0` and
   restores the wall clock before `time-sync.target`, so an offline bench boots with the right time).
 - **I²C**: enables the bus in `/boot/firmware/config.txt` when missing — the reason for the single
   first-run reboot.

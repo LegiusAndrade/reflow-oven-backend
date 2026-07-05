@@ -77,7 +77,7 @@ public sealed class SimulatedSystemController(IClock clock, IOptions<SystemOptio
     }
 
     public Task<TimeStatus> GetTimeStatusAsync(CancellationToken ct = default) =>
-        // RtcPresent mirrors the real appliance (ISL1208 on board), so the simulated clock health is green.
+        // RtcPresent mirrors the real appliance (PT7C4339 on board), so the simulated clock health is green.
         Task.FromResult(new TimeStatus(clock.UtcNow, "America/Sao_Paulo", _ntp, _ntp, RtcPresent: true));
 
     public Task SetTimeAsync(DateTimeOffset time, CancellationToken ct = default)

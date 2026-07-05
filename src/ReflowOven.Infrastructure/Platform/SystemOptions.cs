@@ -39,10 +39,10 @@ public sealed class SystemOptions
     /// <summary>How often the background monitor polls central-server reachability + OTA status (seconds, min 10).</summary>
     public int MonitorIntervalSeconds { get; set; } = 60;
 
-    // --- Hardware clock (ISL1208 RTC) ---------------------------------------------------------------
+    // --- Hardware clock (PT7C4339 RTC) ---------------------------------------------------------------
     /// <summary>Hardware-RTC device written on a manual time-set so the clock survives a power cycle, and
-    /// probed for <c>TimeStatus.RtcPresent</c>. The stock <c>i2c-rtc</c> overlay has no isl1208 option, so
-    /// the chip is bound at boot by <c>deploy/reflow-rtc.service</c> (sysfs new_device on i2c-1 @ 0x6f →
+    /// probed for <c>TimeStatus.RtcPresent</c>. The stock <c>i2c-rtc</c> overlay has no ds1339 option, so
+    /// the chip is bound at boot by <c>deploy/reflow-rtc.service</c> (sysfs new_device on i2c-1 @ 0x68 →
     /// <c>/dev/rtc0</c>, then <c>hwclock --hctosys</c> restores the system clock from it).</summary>
     public string RtcDevice { get; set; } = "/dev/rtc0";
 

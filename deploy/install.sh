@@ -9,7 +9,7 @@
 #      generating a strong JWT signing key, seed passwords and a strong PostgreSQL password —
 #      and applies that password to the running cluster (ALTER USER).
 #   3. Installs + enables reflow-backend.service (Restart=always, Production) and
-#      reflow-rtc.service (bind the ISL1208 → /dev/rtc0 → hwclock --hctosys at boot).
+#      reflow-rtc.service (bind the PT7C4339 → /dev/rtc0 → hwclock --hctosys at boot).
 #   4. Enables the I²C bus in /boot/firmware/config.txt if needed (RTC prerequisite; reboot required
 #      the first time) and makes sure the hwclock binary exists.
 #
@@ -121,5 +121,5 @@ log "  curl -s http://127.0.0.1:5248/health"
 log "  ls -l /dev/rtc0 && hwclock -r -f /dev/rtc0 && timedatectl   # RTC bound + sane time"
 if [ "${REBOOT_NEEDED}" -eq 1 ]; then
     warn "I²C was just enabled in ${CONFIG_TXT} — REBOOT ONCE so i2c-1 (GPIO2/3) appears and"
-    warn "reflow-rtc.service can bind the ISL1208 at 0x6f."
+    warn "reflow-rtc.service can bind the PT7C4339 at 0x68."
 fi

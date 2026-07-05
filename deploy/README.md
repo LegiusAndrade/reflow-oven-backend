@@ -8,7 +8,7 @@ o Postgres ficava exposto na LAN e a Pi bootava com o relógio errado por não l
 | --- | --- |
 | `install.sh` | Instalador idempotente (rodar como root **na Pi**, a partir da raiz do repo) |
 | `reflow-backend.service` | Unit da API: publish self-contained em `/opt/reflow-oven/backend`, `Restart=always`, `Production` |
-| `reflow-rtc.service` | Liga o RTC **ISL1208** (i2c-1 @ `0x6f`) → `/dev/rtc0` e restaura o relógio no boot |
+| `reflow-rtc.service` | Liga o RTC **PT7C4339** (i2c-1 @ `0x68`) → `/dev/rtc0` e restaura o relógio no boot |
 | `backend.env.example` | Template do `/etc/reflow-oven/backend.env` (0600) — segredos reais ficam FORA do git |
 | `reflow-front.service` | Template da unit do front Next.js (`:3000`) — instalar quando o front estiver buildado na Pi |
 
@@ -33,7 +33,7 @@ ss -tlnp | grep 5432                   # Postgres SÓ em 127.0.0.1
 
 ## Decisões de projeto
 
-- **Relógio (BE-8).** A fonte de verdade de parede é o **RTC ISL1208** (bateria), restaurado no boot
+- **Relógio (BE-8).** A fonte de verdade de parede é o **RTC PT7C4339** (bateria), restaurado no boot
   pelo `reflow-rtc.service` (`Before=time-sync.target`); a unit do backend ordena
   `After=time-sync.target`. **Não** se espera NTP (uma bancada offline bootaria pendurada) — com NTP
   disponível o kernel re-disciplina o relógio e regrava o RTC sozinho (11-minute mode). No código, as

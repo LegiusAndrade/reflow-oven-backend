@@ -5,7 +5,7 @@
 #   * ASPNETCORE_ENVIRONMENT=Production: arms the Program.cs fail-fasts (placeholder JWT key and
 #     seed passwords refuse to boot) — real secrets live in the root-only EnvironmentFile.
 #   * After=time-sync.target: reflow-rtc.service (Before=time-sync.target) has already bound the
-#     ISL1208 and restored the system clock from it, so JWT iat/exp, run timestamps and the audit
+#     PT7C4339 and restored the system clock from it, so JWT iat/exp, run timestamps and the audit
 #     trail are sane from the very first request — even on an offline bench (no NTP needed).
 #     Deliberately NOT systemd-time-wait-sync: that waits for NTP and would hang an offline boot.
 #   * After/Wants docker.service: PostgreSQL runs in Docker (restart: unless-stopped). If the DB
