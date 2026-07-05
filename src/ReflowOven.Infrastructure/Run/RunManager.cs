@@ -340,7 +340,9 @@ public sealed class RunManager : IRunManager
                     PcbTemp = (int)Math.Round(run.Last?.Board ?? 0),
                     StartAt = run.StartedAt,
                     EndAt = endedAt,
-                    InputVoltage = 127,
+                    // InputVoltage stays null: SensorReadings has no mains-voltage channel, and a failure
+                    // report must never present a fabricated measurement (the UI renders "—"). VbusV from
+                    // the board snapshot is the DC bus, NOT the mains — do not substitute it here.
                     OutputVoltage = (int)Math.Round(run.Last?.Voltage ?? 0),
                     Snapshot = BuildTrace(run, duration),
                     Events = [new LogEvent { At = endedAt, Kind = LogEventKind.Falha, Message = f.Message, OrderIndex = 0 }],

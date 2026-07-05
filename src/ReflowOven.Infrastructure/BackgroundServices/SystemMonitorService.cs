@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ReflowOven.Application.Dtos;
 using ReflowOven.Application.Services;
 using ReflowOven.Infrastructure.Platform;
 
@@ -12,6 +13,7 @@ namespace ReflowOven.Infrastructure.BackgroundServices;
 /// notification-feed entry (the TopBar bell). Harmless under <c>System:Mode=Simulated</c> — the
 /// simulator reports "online" and no update, so nothing is ever raised. The first poll only
 /// establishes the baseline (no notification). Interval = <c>System:MonitorIntervalSeconds</c>.
+/// Also the home of the daily data-retention sweep (see <see cref="RetentionOptions"/>).
 /// </summary>
 public sealed class SystemMonitorService(
     ISystemController system,
@@ -22,12 +24,18 @@ public sealed class SystemMonitorService(
     ISystemLogSink systemLog,
     INotificationSink notifications,
     IOptions<SystemOptions> options,
+    IOptions<RetentionOptions> retention,
     ILogger<SystemMonitorService> logger) : BackgroundService
 {
     private bool? _lastOnline;
     private string? _lastNotifiedVersion;
     private bool? _lastDiskLow;
     private bool? _lastPowerGood;
+
+    /// <summary>Monotonic mark of the last retention sweep; 0 = never (sweep on the first poll after
+    /// boot, so a device rebooted daily still gets its retention applied).</summary>
+    private long _lastRetentionSweep;
+    private static readonly TimeSpan RetentionSweepPeriod = TimeSpan.FromHours(24);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -120,6 +128,142 @@ public sealed class SystemMonitorService(
                 [OperationField.Of("estado", powerGood ? "ok" : "falha")], ct);
         }
         _lastPowerGood = powerGood;
+
+        await SweepRetentionAsync(ct);
+    }
+
+    /// <summary>
+    /// Daily retention janitor for the append-only stores the Manutenção cleanup deliberately refuses to
+    /// clear: purges operation-log rows past <see cref="RetentionOptions.OperationLogDays"/> and emptied
+    /// (soft-deleted) notifications past <see cref="RetentionOptions.NotificationTrashDays"/>. Scheduled on
+    /// the monotonic clock (a wall-clock step never skips or double-runs it); best-effort — a failure is
+    /// logged and retried at the next 24 h window (retention is a janitor, not a time-critical task). The
+    /// sweep is audited on the operation log itself (after the purge, so the fresh row survives it).
+    /// </summary>
+    private async Task SweepRetentionAsync(CancellationToken ct)
+    {
+        var o = retention.Value;
+        if (o.OperationLogDays <= 0 && o.NotificationTrashDays <= 0) return; // fully disabled
+        if (_lastRetentionSweep != 0 && clock.GetElapsedTime(_lastRetentionSweep) < RetentionSweepPeriod) return;
+        _lastRetentionSweep = clock.GetTimestamp();
+
+        try
+        {
+            var now = clock.UtcNow;
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+
+            var opLogRemoved = 0;
+            if (o.OperationLogDays > 0)
+            {
+                var cutoff = now.AddDays(-o.OperationLogDays);
+                opLogRemoved = await db.OperationLog.Where(x => x.At < cutoff).ExecuteDeleteAsync(ct);
+            }
+
+            var trashRemoved = 0;
+            if (o.NotificationTrashDays > 0)
+            {
+                var cutoff = now.AddDays(-o.NotificationTrashDays);
+                trashRemoved = await db.Notifications.IgnoreQueryFilters()
+                    .Where(n => n.IsDeleted && n.DeletedAt != null && n.DeletedAt < cutoff)
+                    .ExecuteDeleteAsync(ct);
+            }
+
+            if (opLogRemoved > 0 || trashRemoved > 0)
+            {
+                var audit = scope.ServiceProvider.GetRequiredService<AuditService>();
+                audit.Record(OperationType.Limpeza, OperationObject.Sistema, "retencao",
+                    [
+                        OperationField.Of("log_operacao_removidos", opLogRemoved),
+                        OperationField.Of("lixeira_notificacoes_removidas", trashRemoved),
+                    ],
+                    operatorName: "Sistema");
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation(
+                    "Retenção aplicada: {OpLog} linha(s) do log de operação e {Trash} notificação(ões) da lixeira removidas.",
+                    opLogRemoved, trashRemoved);
+            }
+
+            // BE-6 purge preview: announce what TOMORROW's sweep will delete via ONE refreshed feed entry.
+            var warning = await UpsertPurgeWarningAsync(db, o, now, ct);
+            if (warning is not null)
+            {
+                await notifications.PublishAsync(warning);
+                logger.LogInformation("Aviso de expurgo de retenção atualizado: {Message}", warning.Message);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // shutdown: bubble to the poll loop's handler
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Falha na varredura de retenção (nova tentativa na próxima janela de 24 h).");
+        }
+    }
+
+    /// <summary>Title of THE single pending purge-preview warning — also its upsert key in the feed.</summary>
+    internal const string PurgeWarningTitle = "Exclusão de registros agendada";
+
+    /// <summary>
+    /// BE-6 purge preview: computes what the NEXT daily sweep will delete — rows crossing their retention
+    /// threshold within 24 h, i.e. already older than <c>cutoff − 1 day</c> — and upserts ONE Warning feed
+    /// entry (the feed's "Atenção" level), refreshed in place instead of stacking a new row per day. When
+    /// operation-log rows are involved it carries a Relatórios deep link
+    /// (<c>{ tab: "relatorios", until: cutoff }</c>); a trash-only warning has none (the notification trash
+    /// is Master-only, no Relatórios view applies). Returns the DTO to publish, or null when nothing will
+    /// be deleted or the pending entry already tells today's picture. Static + internal so the unit tests
+    /// can drive it directly against an in-memory context.
+    /// </summary>
+    internal static async Task<NotificationDto?> UpsertPurgeWarningAsync(
+        IAppDbContext db, RetentionOptions options, DateTimeOffset now, CancellationToken ct)
+    {
+        var opCutoff = now.AddDays(1 - options.OperationLogDays);       // what tomorrow's sweep will use
+        var trashCutoff = now.AddDays(1 - options.NotificationTrashDays);
+
+        var opCount = options.OperationLogDays > 0
+            ? await db.OperationLog.CountAsync(x => x.At < opCutoff, ct)
+            : 0;
+        var trashCount = options.NotificationTrashDays > 0
+            ? await db.Notifications.IgnoreQueryFilters()
+                .CountAsync(n => n.IsDeleted && n.DeletedAt != null && n.DeletedAt < trashCutoff, ct)
+            : 0;
+        if (opCount == 0 && trashCount == 0) return null;
+
+        var message = ComposePurgeWarningMessage(opCount, opCutoff, trashCount, trashCutoff);
+        var pending = await db.Notifications.FirstOrDefaultAsync(n => n.Title == PurgeWarningTitle, ct);
+        if (pending is not null && pending.Message == message) return null; // today's picture is already told
+
+        if (pending is null)
+        {
+            pending = new Notification { Id = Guid.NewGuid(), Title = PurgeWarningTitle };
+            db.Notifications.Add(pending);
+        }
+        pending.Kind = NotificationFeedKind.Warning;
+        pending.At = now;
+        pending.Message = message;
+        pending.Read = false; // refreshed content re-surfaces on the bell
+        pending.DeepLink = opCount > 0 ? new NotificationDeepLink { Tab = "relatorios", Until = opCutoff } : null;
+        await db.SaveChangesAsync(ct);
+        return NotificationDto.From(pending);
+    }
+
+    /// <summary>The pt-BR warning line — "N … serão excluídos amanhã (anteriores a DD/MM/AAAA)." — with
+    /// each category keeping its own cutoff date. Dates are pinned to DD/MM/AAAA whatever the host culture.</summary>
+    internal static string ComposePurgeWarningMessage(
+        int opCount, DateTimeOffset opCutoff, int trashCount, DateTimeOffset trashCutoff)
+    {
+        var op = $"{opCount} registro(s) do log de operação";
+        var trash = $"{trashCount} notificação(ões) da lixeira";
+        return (opCount > 0, trashCount > 0) switch
+        {
+            (true, false) => $"{op} serão excluídos amanhã (anteriores a {D(opCutoff)}).",
+            (false, true) => $"{trash} serão excluídas amanhã (anteriores a {D(trashCutoff)}).",
+            _ => $"{op} (anteriores a {D(opCutoff)}) e {trash} (anteriores a {D(trashCutoff)}) serão excluídos amanhã.",
+        };
+
+        static string D(DateTimeOffset d) =>
+            d.ToString("dd'/'MM'/'yyyy", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private async Task RaiseDiskLowAsync(double freePct, double freeGB, double totalGB, CancellationToken ct)

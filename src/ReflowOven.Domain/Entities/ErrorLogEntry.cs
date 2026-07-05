@@ -37,8 +37,10 @@ public class ErrorLogEntry
     public DateTimeOffset StartAt { get; set; }
     public DateTimeOffset EndAt { get; set; }
 
-    /// <summary>Input mains voltage (VAC, ~127).</summary>
-    public int InputVoltage { get; set; }
+    /// <summary>Input mains voltage (VAC) at the fault, or null when not measured. The power board has no
+    /// mains-voltage channel today, so runtime faults persist null — never a fabricated reading (the UI
+    /// renders "—"). Only demo-seeded rows carry a synthetic plausible value.</summary>
+    public int? InputVoltage { get; set; }
 
     /// <summary>Output voltage (VDC, 0..180).</summary>
     public int OutputVoltage { get; set; }

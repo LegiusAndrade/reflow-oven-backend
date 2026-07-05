@@ -200,6 +200,7 @@ public sealed class ReflowDbContext(DbContextOptions<ReflowDbContext> options) :
             e.Property(n => n.Title).HasMaxLength(120);
             e.Property(n => n.Message).HasMaxLength(500);
             e.Property(n => n.DeletedBy).HasMaxLength(DomainConstants.UserNameMaxLength);
+            e.OwnsOne(n => n.DeepLink, d => d.ToJson()); // optional { tab, until } payload, one jsonb column
             e.HasQueryFilter(n => !n.IsDeleted); // soft-delete: cleared notifications are hidden by default
             e.HasIndex(n => n.At);
             e.HasIndex(n => n.Read);

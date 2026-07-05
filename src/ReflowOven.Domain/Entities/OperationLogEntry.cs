@@ -6,8 +6,10 @@ namespace ReflowOven.Domain.Entities;
 /// One row of the universal operation log ("Log de Operação") — an append-only audit trail that records
 /// every notable action across the device: program/config changes, executions, board faults, RS422 /
 /// central-server communication, logins, calibration and maintenance. Mirrors the operator-facing columns
-/// DATA · OPERADOR · TIPO · OBJETO · OBJETO ID · DADOS. It is protected from the Manutenção cleanup and has
-/// its own retention. <b>Never stores a password value</b> (a password change is logged as "senha alterada").
+/// DATA · OPERADOR · TIPO · OBJETO · OBJETO ID · DADOS. It is protected from the Manutenção cleanup; its
+/// only pruning is the age-based retention sweep (daily in <c>SystemMonitorService</c>, window
+/// <c>Retention:OperationLogDays</c>, default 365 days) plus the factory reset. <b>Never stores a password
+/// value</b> (a password change is logged as "senha alterada").
 /// </summary>
 public class OperationLogEntry
 {

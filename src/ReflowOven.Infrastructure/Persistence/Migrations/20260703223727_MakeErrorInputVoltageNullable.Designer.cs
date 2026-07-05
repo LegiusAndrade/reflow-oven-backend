@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ReflowOven.Infrastructure.Persistence;
@@ -12,9 +13,11 @@ using ReflowOven.Infrastructure.Persistence;
 namespace ReflowOven.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ReflowDbContext))]
-    partial class ReflowDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260703223727_MakeErrorInputVoltageNullable")]
+    partial class MakeErrorInputVoltageNullable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -701,19 +704,6 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
                     b.ToTable("SystemLog");
                 });
 
-            modelBuilder.Entity("ReflowOven.Domain.Entities.TokenRevocation", b =>
-                {
-                    b.Property<Guid>("Subject")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Subject");
-
-                    b.ToTable("TokenRevocations");
-                });
-
             modelBuilder.Entity("ReflowOven.Domain.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1163,32 +1153,6 @@ namespace ReflowOven.Infrastructure.Persistence.Migrations
                     b.Navigation("ErrorLogEntry");
 
                     b.Navigation("ExecutionReport");
-                });
-
-            modelBuilder.Entity("ReflowOven.Domain.Entities.Notification", b =>
-                {
-                    b.OwnsOne("ReflowOven.Domain.Entities.NotificationDeepLink", "DeepLink", b1 =>
-                        {
-                            b1.Property<Guid>("NotificationId");
-
-                            b1.Property<string>("Tab")
-                                .IsRequired();
-
-                            b1.Property<DateTimeOffset>("Until");
-
-                            b1.HasKey("NotificationId");
-
-                            b1.ToTable("Notifications");
-
-                            b1
-                                .ToJson("DeepLink")
-                                .HasColumnType("jsonb");
-
-                            b1.WithOwner()
-                                .HasForeignKey("NotificationId");
-                        });
-
-                    b.Navigation("DeepLink");
                 });
 
             modelBuilder.Entity("ReflowOven.Domain.Entities.NotificationSetting", b =>

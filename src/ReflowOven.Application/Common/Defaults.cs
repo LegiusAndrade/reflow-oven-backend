@@ -26,7 +26,7 @@ public static class Defaults
     /// <summary>Dev password every seeded user (and the factory-reset admin) gets. Change in production.</summary>
     public const string DefaultDevPassword = "reflow1234";
 
-    // --- Fault catalog (E-101..E-160) -----------------------------------------------------
+    // --- Fault catalog (E-101..E-180) -----------------------------------------------------
     public static List<FaultType> FaultTypes() =>
     [
         new() { Code = "E-101", Severity = ErrorSeverity.Critico, Message = "Sobretemperatura na grelha (termopar tipo-K)" },
@@ -37,6 +37,8 @@ public static class Defaults
         new() { Code = "E-140", Severity = ErrorSeverity.Alerta, Message = "Dissipador acima do limite (NTC)" },
         new() { Code = "E-150", Severity = ErrorSeverity.Aviso, Message = "Ventoinha 1 com rotação abaixo do esperado" },
         new() { Code = "E-160", Severity = ErrorSeverity.Aviso, Message = "Subtensão na entrada 127 VAC" },
+        new() { Code = "E-170", Severity = ErrorSeverity.Critico, Message = "Sobretemperatura da placa de potência" },
+        new() { Code = "E-180", Severity = ErrorSeverity.Critico, Message = "Falha de pré-carga do barramento DC" },
     ];
 
     // --- Settings singleton (DEFAULT_SETTINGS) --------------------------------------------

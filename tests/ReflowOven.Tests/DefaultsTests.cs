@@ -14,7 +14,7 @@ public class DefaultsTests
     [Fact]
     public void Reference_data_matches_the_frontend()
     {
-        Assert.Equal(8, Defaults.FaultTypes().Count);
+        Assert.Equal(10, Defaults.FaultTypes().Count); // 8 original + E-170/E-180 (firmware BOARD_OVER_TEMP/PRECHARGE)
         Assert.Equal(11, Defaults.NotificationSettings().Count);
         Assert.Equal(7, Defaults.RunSeries().Count);
     }

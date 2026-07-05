@@ -102,7 +102,10 @@ public sealed record ErrorDetailDto(
     int PcbTemp,
     DateTimeOffset StartAt,
     DateTimeOffset EndAt,
-    int InputVoltage,
+    /// <summary>Input mains voltage (VAC) at the fault, or null when not measured — the board reports no
+    /// mains channel today, so runtime faults carry null (the UI renders "—"); omitted from the JSON when
+    /// null. Coordinated contract change with the frontend (was a fabricated constant 127).</summary>
+    int? InputVoltage,
     int OutputVoltage,
     FailureSnapshotDto Snapshot,
     IReadOnlyList<LogEventDto> Events,

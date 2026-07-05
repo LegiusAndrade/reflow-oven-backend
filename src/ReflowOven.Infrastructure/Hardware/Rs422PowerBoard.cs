@@ -629,23 +629,26 @@ public sealed class Rs422PowerBoard : IPowerBoard, IDisposable
     /// (most severe first). <c>fault_code≠0</c> raises the first matching flag; the event is edge-triggered.</summary>
     private static readonly (ushort Bit, string Code)[] FaultBitMap =
     [
-        (1 << 2, "E-101"), // OVER_TEMP  — oven over-temperature
-        (1 << 0, "E-102"), // TC         — thermocouple open/short
-        (1 << 5, "E-110"), // OVER_CURR  — output over-current
-        (1 << 6, "E-110"), // GATE       — gate-driver fault (power stage)
-        (1 << 3, "E-120"), // OVER_VOLT  — bus over-voltage
-        (1 << 4, "E-120"), // UNDER_VOLT — bus under-voltage
-        (1 << 7, "E-120"), // POWER_GOOD — power-good lost
-        (1 << 1, "E-140"), // NTC        — heatsink NTC fault
-        (1 << 9, "E-130"), // COMMS_LOSS — host link lost
-        (1 << 8, "E-150"), // FAN        — a fan stalled
+        (1 << 2, "E-101"),  // OVER_TEMP       — oven over-temperature
+        (1 << 0, "E-102"),  // TC              — thermocouple open/short
+        (1 << 11, "E-170"), // BOARD_OVER_TEMP — power-board over-temperature
+        (1 << 5, "E-110"),  // OVER_CURR       — output over-current
+        (1 << 6, "E-110"),  // GATE            — gate-driver fault (power stage)
+        (1 << 12, "E-180"), // PRECHARGE       — DC-bus precharge failed (firmware blink code 13)
+        (1 << 3, "E-120"),  // OVER_VOLT       — bus over-voltage
+        (1 << 4, "E-120"),  // UNDER_VOLT      — bus under-voltage
+        (1 << 7, "E-120"),  // POWER_GOOD      — power-good lost
+        (1 << 1, "E-140"),  // NTC             — heatsink NTC fault
+        (1 << 9, "E-130"),  // COMMS_LOSS      — host link lost
+        (1 << 8, "E-150"),  // FAN             — a fan stalled
     ];
 
     /// <summary>Map the firmware fault bitfield to a catalogued E-code, or null when no fault is latched
     /// (<c>fault_code == 0</c>). The first matching flag in raise-priority order wins; a set <c>fault_code</c>
     /// with no known flag bit is treated as a generic critical (E-101) so a real fault is never dropped. Pure,
-    /// so the same code feeds both the cached <see cref="SensorReadings.FaultCode"/> and the edge-trigger.</summary>
-    private static string? MapFaultCode(ushort faultCode, ushort faultFlags)
+    /// so the same code feeds both the cached <see cref="SensorReadings.FaultCode"/> and the edge-trigger.
+    /// Internal (not private) so the fault-map lock-step test can drive it directly.</summary>
+    internal static string? MapFaultCode(ushort faultCode, ushort faultFlags)
     {
         if (faultCode == 0) return null;
         foreach (var (bit, c) in FaultBitMap)

@@ -105,6 +105,10 @@ public static class DependencyInjection
         else
             services.AddSingleton<IBoardGpio, SimulatedBoardGpio>();
 
+        // Data-retention windows for the append-only stores (operation log, notification trash) applied
+        // by the daily sweep in SystemMonitorService. Overridable via Retention__* env/config.
+        services.Configure<RetentionOptions>(config.GetSection(RetentionOptions.Section));
+
         services.AddSingleton<IControlHealth, ControlHealth>();
         services.AddHostedService<SystemMonitorService>();
         services.AddHostedService<ControlHealthService>(); // samples the control board's own health

@@ -29,4 +29,17 @@ public class Notification
     public bool IsDeleted { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
     public string? DeletedBy { get; set; }
+
+    /// <summary>Optional frontend deep link (<c>deepLink</c> on the wire, omitted when null): where the UI
+    /// should navigate when the entry is tapped — e.g. the retention purge warning points at Relatórios
+    /// filtered up to the cutoff. Stored as one jsonb column.</summary>
+    public NotificationDeepLink? DeepLink { get; set; }
+}
+
+/// <summary>Deep-link payload of a feed entry: the frontend tab to open and the ISO-8601 cutoff the target
+/// view should filter to — <c>{ tab, until }</c> on the wire.</summary>
+public class NotificationDeepLink
+{
+    public string Tab { get; set; } = "";
+    public DateTimeOffset Until { get; set; }
 }

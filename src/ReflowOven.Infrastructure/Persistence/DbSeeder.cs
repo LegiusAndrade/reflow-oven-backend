@@ -6,8 +6,11 @@ public static partial class DbSeeder
     public static async Task SeedAsync(ReflowDbContext db, IPasswordHasher hasher, IClock clock,
         IMasterCredentials master, IAdminCredentials admin, IRegularCredentials regular, CancellationToken ct = default)
     {
-        if (!await db.FaultTypes.AnyAsync(ct))
-            db.FaultTypes.AddRange(Defaults.FaultTypes());
+        // Top-up, not only first-run: an already-seeded catalog gains newly-shipped codes (e.g. E-170/E-180
+        // for the firmware's BOARD_OVER_TEMP/PRECHARGE fault bits) so the DB stays in lock-step with
+        // Defaults.FaultTypes and the Rs422PowerBoard bit map. Existing rows are never modified.
+        var knownFaultCodes = await db.FaultTypes.Select(f => f.Code).ToListAsync(ct);
+        db.FaultTypes.AddRange(Defaults.FaultTypes().Where(f => !knownFaultCodes.Contains(f.Code)));
 
         if (!await db.Settings.AnyAsync(ct))
             db.Settings.Add(Defaults.Settings());
