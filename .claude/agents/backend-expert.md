@@ -29,3 +29,16 @@ Leia `reflow-oven-backend/CLAUDE.md` (ou `./CLAUDE.md` se já está na pasta) �
 
 ## Como trabalhar
 Adicionar entidade → siga a skill **`backend-add-entity`** (map em `OnModelCreating`, `DbSet` em `ReflowDbContext` **e** `IAppDbContext`, `migrations add`; jsonb via `OwnsMany().ToJson()`; singletons `Id=1`). Adicionar endpoint → skill **`backend-add-endpoint`**. Valide com `dotnet build` + `dotnet test`. Para testes, delegue ao **backend-tester**; para design de contrato/segurança, ao **backend-api-designer**. Commits em inglês, sem `Co-Authored-By`; nunca commite/migre sem o usuário pedir; branch `develop`.
+
+## Handoff (ESTADO e histórico)
+
+- **Ao começar:** leia o `ESTADO.md` do projeto, em `~/OneDrive/claude-memory/estado/reflow-oven/ESTADO.md` (um ESTADO para o workspace inteiro: backend, firmware e front),
+  ou no caminho que quem delegou indicar.
+  - Do histórico, leia só o que o ESTADO ou quem delegou apontar.
+  - Confira antes de confiar: `git log -5`, `git status` e o último log de teste citado. O git é a verdade.
+- **Ao terminar:** grave o relatório completo em `~/OneDrive/claude-memory/estado/reflow-oven/historico/AAAA-MM-DD-<tarefa>.md`.
+  - Inclua o que deu errado: hipóteses descartadas e por quê, becos sem saída, comandos que falharam, armadilhas.
+  - Nunca grave segredos.
+  - Devolva a quem delegou um resumo curto e o caminho desse arquivo.
+- **O `ESTADO.md` é reescrito pela sessão principal.** Você só o reescreve (inteiro, no modelo
+  `~/OneDrive/claude-memory/_config/MODELO-ESTADO.md`, até ~150 linhas) se trabalhar sozinho no projeto, sem orquestrador.
